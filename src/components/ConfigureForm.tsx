@@ -24,8 +24,11 @@ function Field({
   onChange: (value: CellValue) => void
 }) {
   const id = `field-${field.key}`
-  const baseClass =
-    'rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100'
+  const isEmpty = value === '' || value === null || value === undefined
+  const requiredEmpty = field.required && isEmpty
+  const baseClass = `rounded-lg border bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 ${
+    requiredEmpty ? 'border-red-300' : 'border-slate-300'
+  }`
 
   function renderControl() {
     switch (field.type) {
@@ -97,8 +100,12 @@ function Field({
 
   return (
     <div className="flex flex-col gap-1.5">
-      <label htmlFor={id} className="text-sm font-medium text-slate-600">
+      <label
+        htmlFor={id}
+        className="flex items-center gap-1 text-sm font-medium text-slate-600"
+      >
         {field.label}
+        {field.required && <span className="text-red-500">*</span>}
       </label>
       {renderControl()}
     </div>

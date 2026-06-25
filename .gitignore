@@ -17,6 +17,7 @@ dist-ssr
 *.png
 
 # Editor directories and files
+.claude/
 .vscode/*
 !.vscode/extensions.json
 .idea
@@ -26,3 +27,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Docs
+NOTE_TECHNIQUE.md
+Equipes ORKA.xlsx
+Matrice ORKA.xlsx
