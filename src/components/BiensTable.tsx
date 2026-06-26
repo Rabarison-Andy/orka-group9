@@ -10,7 +10,6 @@ import { buildEntityTree, type BienRow, type EntityNode } from '../lib/entity'
 
 interface BiensTableProps {
   apartments: Apartment[]
-  busy?: boolean
   /** Dégrèvement net signé par invariant (négatif = économie, positif = surcoût). */
   degrevement?: Map<string, number>
   /** Actions de pied de page (boutons de réclamation), rendues sous le tableau. */
@@ -111,11 +110,9 @@ function TriCheckbox({ state, onChange }: { state: 'all' | 'some' | 'none'; onCh
 
 export function BiensTable({
   apartments,
-  busy = false,
   degrevement,
   actions,
   onConfigure,
-  onBulkEdit,
 }: BiensTableProps) {
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -202,11 +199,6 @@ export function BiensTable({
         ? 'some'
         : 'none'
 
-  function applyBulk(changes: Partial<Apartment>) {
-    if (selected.size === 0) return
-    onBulkEdit([...selected], changes)
-    setSelected(new Set())
-  }
   function toggleExpand(key: string) {
     setExpanded((prev) => {
       const next = new Set(prev)
@@ -216,7 +208,8 @@ export function BiensTable({
     })
   }
 
-  const colSpan = 2 + activeCols.length + 2
+  const showDegrevement = degrevement !== undefined
+  const colSpan = 2 + activeCols.length + (showDegrevement ? 1 : 0) + 1
 
   return (
     <div className="flex flex-col gap-4">
@@ -297,8 +290,6 @@ export function BiensTable({
         </div>
       </div>
 
-      {selected.size > 0 && <BulkEditBar count={selected.size} busy={busy} onApply={applyBulk} />}
-
       {/* Table arborescente groupée par entité. Largeurs fixes : déplier un lot
           ne recalcule jamais les colonnes (pas de décalage brutal). */}
       <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -309,7 +300,7 @@ export function BiensTable({
             {activeCols.map((c) => (
               <col key={c.key} style={{ width: c.width }} />
             ))}
-            <col style={{ width: 168 }} />
+            {showDegrevement && <col style={{ width: 168 }} />}
             <col style={{ width: 150 }} />
           </colgroup>
           <thead>
@@ -323,7 +314,7 @@ export function BiensTable({
                   {c.label}
                 </th>
               ))}
-              <th className="px-4 py-3 font-semibold">Dégrèvement estimé</th>
+              {showDegrevement && <th className="px-4 py-3 font-semibold">Dégrèvement estimé</th>}
               <th className="px-4 py-3" />
             </tr>
           </thead>
@@ -337,6 +328,7 @@ export function BiensTable({
                   state={entityState(node)}
                   activeCols={activeCols}
                   selected={selected}
+                  showDegrevement={showDegrevement}
                   degrevOf={degrevOf}
                   onToggleExpand={() => toggleExpand(node.key)}
                   onToggleEntity={() => toggleEntity(node)}
@@ -350,6 +342,7 @@ export function BiensTable({
                   depth={0}
                   activeCols={activeCols}
                   checked={selected.has(node.row.index)}
+                  showDegrevement={showDegrevement}
                   degrev={degrevOf(node.row.apt)}
                   onToggle={() => toggleBien(node.row.index)}
                   onConfigure={onConfigure}
@@ -419,6 +412,7 @@ function EntityRows({
   state,
   activeCols,
   selected,
+  showDegrevement,
   degrevOf,
   onToggleExpand,
   onToggleEntity,
@@ -430,6 +424,7 @@ function EntityRows({
   state: 'all' | 'some' | 'none'
   activeCols: typeof COLUMNS
   selected: Set<number>
+  showDegrevement: boolean
   degrevOf: (apt: Apartment) => number
   onToggleExpand: () => void
   onToggleEntity: () => void
@@ -465,9 +460,11 @@ function EntityRows({
             {c.key === 'surface' ? `${node.surface} m²` : ''}
           </td>
         ))}
-        <td className="px-4 py-3">
-          <DegrevementPill value={total} />
-        </td>
+        {showDegrevement && (
+          <td className="px-4 py-3">
+            <DegrevementPill value={total} />
+          </td>
+        )}
         <td className="px-4 py-3 text-right">
           <DetailsBtn onClick={() => onConfigure(node.rows[0].index)} />
         </td>
@@ -480,6 +477,7 @@ function EntityRows({
             depth={1}
             activeCols={activeCols}
             checked={selected.has(r.index)}
+            showDegrevement={showDegrevement}
             degrev={degrevOf(r.apt)}
             onToggle={() => onToggleBien(r.index)}
             onConfigure={onConfigure}
@@ -496,6 +494,7 @@ function BienTr({
   depth,
   activeCols,
   checked,
+  showDegrevement,
   degrev,
   onToggle,
   onConfigure,
@@ -504,6 +503,7 @@ function BienTr({
   depth: number
   activeCols: typeof COLUMNS
   checked: boolean
+  showDegrevement: boolean
   degrev: number
   onToggle: () => void
   onConfigure: (index: number) => void
@@ -534,9 +534,11 @@ function BienTr({
           <CellValueView apt={row.apt} col={c} />
         </td>
       ))}
-      <td className="px-4 py-3">
-        <DegrevementPill value={degrev} />
-      </td>
+      {showDegrevement && (
+        <td className="px-4 py-3">
+          <DegrevementPill value={degrev} />
+        </td>
+      )}
       <td className="px-4 py-3 text-right">
         <DetailsBtn onClick={() => onConfigure(row.index)} />
       </td>

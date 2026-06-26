@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { BiensTable } from './BiensTable'
 import { formatEuros, display } from '../format'
 import type { Apartment } from '../types'
@@ -27,19 +27,17 @@ interface ParcDashboardProps {
     invariants: string[],
     action: BulkResolutionAction,
   ) => void
-  onBulkEdit: (indices: number[], changes: Partial<Apartment>) => void
   onConfigure: (index: number) => void
   onReset: () => void
   onGenerateReport: () => void
 }
 
-/** L'action « accepter » diffère selon le côté : conserver (ERP) / importer (fisc). */
 const ACCEPT: Record<
   'erp_only' | 'fisc_only',
   { action: BulkResolutionAction; label: string }
 > = {
   erp_only: { action: 'keep', label: 'Conserver' },
-  fisc_only: { action: 'import', label: 'Importer' },
+  fisc_only: { action: 'import', label: 'Conserver' },
 }
 
 type Tab = 'restitution' | 'matched' | 'erp_only' | 'fisc_only'
@@ -98,36 +96,34 @@ const RESOLUTION_LABEL: Record<ResolutionAction, string> = {
   keep: 'Conservé',
 }
 
-/** Boutons de résolution d'un cas non apparié, avec rattachement ciblé. */
+/** Boutons de résolution d'un cas non apparié. Disparaissent une fois résolu. */
 function ResolveActions({
   item,
   side,
-  targets,
   busy,
   onResolve,
 }: {
   item: ReconcileItem
   side: 'erp_only' | 'fisc_only'
-  targets: ReconcileItem[]
   busy: boolean
   onResolve: ParcDashboardProps['onResolve']
 }) {
-  const btn = 'rounded-md border px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-50'
-  const active = 'border-emerald-600 bg-emerald-600 text-white'
-  const idle = 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
   const accept = ACCEPT[side]
+  if (item.resolved) {
+    return (
+      <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+        ✓ {item.resolution ? RESOLUTION_LABEL[item.resolution] : 'Résolu'}
+      </span>
+    )
+  }
+  const btn = 'rounded-md border px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-50'
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      {item.resolved && (
-        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
-          ✓ {item.resolution ? RESOLUTION_LABEL[item.resolution] : 'Résolu'}
-        </span>
-      )}
       <button
         type="button"
         disabled={busy}
         onClick={() => onResolve(item.invariant, side, accept.action)}
-        className={`${btn} ${item.resolution === accept.action ? active : idle}`}
+        className={`${btn} border-slate-300 bg-white text-slate-700 hover:bg-slate-50`}
       >
         {accept.label}
       </button>
@@ -135,30 +131,10 @@ function ResolveActions({
         type="button"
         disabled={busy}
         onClick={() => onResolve(item.invariant, side, 'exclude')}
-        className={`${btn} ${item.resolution === 'exclude' ? active : idle}`}
+        className={`${btn} border-slate-300 bg-white text-slate-700 hover:bg-slate-50`}
       >
         Exclure
       </button>
-      <select
-        disabled={busy || targets.length === 0}
-        value=""
-        onChange={(e) => e.target.value && onResolve(item.invariant, side, 'attach', e.target.value)}
-        className={`${btn} ${item.resolution === 'attach' ? active : idle} cursor-pointer`}
-        title={
-          targets.length === 0
-            ? 'Aucune contrepartie orpheline à rattacher'
-            : 'Rattacher à une fiche orpheline'
-        }
-      >
-        <option value="">
-          {targets.length === 0 ? 'Rattacher (aucune)' : `Rattacher à… (${targets.length})`}
-        </option>
-        {targets.map((t) => (
-          <option key={t.invariant} value={t.invariant}>
-            {t.invariant} — {t.label}
-          </option>
-        ))}
-      </select>
     </div>
   )
 }
@@ -171,22 +147,12 @@ export function ParcDashboard({
   reportError = null,
   onResolve,
   onResolveBulk,
-  onBulkEdit,
   onConfigure,
   onReset,
   onGenerateReport,
 }: ParcDashboardProps) {
   const [tab, setTab] = useState<Tab>('restitution')
   const { counts, canGenerateReport } = reconcile
-
-  // Dégrèvement net par invariant (pour la colonne « Dégrèvement estimé »).
-  const degrevByInv = useMemo(() => {
-    const m = new Map<string, number>()
-    for (const it of reconcile.matched) {
-      m.set(it.invariant.trim().toUpperCase(), it.degrevementEuros)
-    }
-    return m
-  }, [reconcile.matched])
 
   const tabs: { id: Tab; label: string; count?: number }[] = [
     { id: 'restitution', label: 'Restitution' },
@@ -248,11 +214,8 @@ export function ParcDashboard({
       {tab === 'restitution' && (
         <BiensTable
           apartments={apartments}
-          busy={busy}
-          degrevement={degrevByInv}
           actions={reportActions}
           onConfigure={onConfigure}
-          onBulkEdit={onBulkEdit}
         />
       )}
 
@@ -268,11 +231,10 @@ export function ParcDashboard({
           <UnmatchedTable
             items={reconcile.erpOnly}
             side="erp_only"
-            targets={reconcile.fiscOnly}
             busy={busy}
             onResolve={onResolve}
             onResolveBulk={onResolveBulk}
-            help="Ces biens de votre fichier sont inconnus du fisc. Conservez-les (les garder dans le parc), excluez-les, ou rattachez-les à une fiche fiscale orpheline."
+            help="Ces biens de votre fichier sont inconnus du fisc. Conservez-les dans le parc ou excluez-les."
             emptyLabel="Aucun bien « ERP uniquement »."
           />
           <div className="flex justify-end">{reportActions}</div>
@@ -284,11 +246,10 @@ export function ParcDashboard({
           <UnmatchedTable
             items={reconcile.fiscOnly}
             side="fisc_only"
-            targets={reconcile.erpOnly}
             busy={busy}
             onResolve={onResolve}
             onResolveBulk={onResolveBulk}
-            help="Le fisc taxe ces biens absents de votre fichier. Importez-les (les ajouter au parc), excluez-les, ou rattachez-les à un de vos biens orphelins."
+            help="Le fisc taxe ces biens absents de votre fichier. Conservez-les dans le parc ou excluez-les."
             emptyLabel="Aucune fiche « Fisc uniquement »."
           />
           <div className="flex justify-end">{reportActions}</div>
@@ -346,7 +307,6 @@ function MatchedTable({ items }: { items: ReconcileItem[] }) {
 function UnmatchedTable({
   items,
   side,
-  targets,
   busy,
   onResolve,
   onResolveBulk,
@@ -355,7 +315,6 @@ function UnmatchedTable({
 }: {
   items: ReconcileItem[]
   side: 'erp_only' | 'fisc_only'
-  targets: ReconcileItem[]
   busy: boolean
   onResolve: ParcDashboardProps['onResolve']
   onResolveBulk: ParcDashboardProps['onResolveBulk']
@@ -372,7 +331,6 @@ function UnmatchedTable({
     )
   }
 
-  const openTargets = targets.filter((t) => !t.resolved)
   const accept = ACCEPT[side]
 
   function toggle(inv: string) {
@@ -476,7 +434,6 @@ function UnmatchedTable({
                     <ResolveActions
                       item={it}
                       side={side}
-                      targets={openTargets}
                       busy={busy}
                       onResolve={onResolve}
                     />

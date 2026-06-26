@@ -35,6 +35,7 @@ function App() {
   const [reconcileData, setReconcileData] = useState<ReconcileResponse | null>(null)
   const [anomalyReport, setAnomalyReport] = useState<AnomalyReport | null>(null)
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
+  const [returnView, setReturnView] = useState<'parc' | 'anomalies'>('parc')
   const [processing, setProcessing] = useState(false)
   const [busy, setBusy] = useState(false)
   const [mappingError, setMappingError] = useState<string | null>(null)
@@ -139,23 +140,8 @@ function App() {
 
   function handleConfigure(index: number) {
     setSelectedIndex(index)
+    setReturnView(view === 'anomalies' ? 'anomalies' : 'parc')
     setView('form')
-  }
-
-  /** Applique `changes` (mêmes valeurs) à plusieurs biens, persisté côté serveur. */
-  async function handleBulkEdit(indices: number[], changes: Partial<Apartment>) {
-    if (!extract) return
-    setBusy(true)
-    setReportError(null)
-    try {
-      const res = await editBiens(extract.uploadId, indices, changes)
-      setApartments(res.apartments)
-      setReconcileData(res.reconcile)
-    } catch (err) {
-      setReportError(err instanceof ApiClientError ? err.message : 'Échec de la modification.')
-    } finally {
-      setBusy(false)
-    }
   }
 
   async function handleSave(updated: Apartment) {
@@ -170,7 +156,7 @@ function App() {
       setApartments((prev) => prev.map((apt, i) => (i === selectedIndex ? updated : apt)))
     } finally {
       setBusy(false)
-      setView('parc')
+      setView(returnView)
       setSelectedIndex(null)
     }
   }
@@ -215,7 +201,6 @@ function App() {
           reportError={reportError}
           onResolve={handleResolve}
           onResolveBulk={handleResolveBulk}
-          onBulkEdit={handleBulkEdit}
           onConfigure={handleConfigure}
           onReset={handleReset}
           onGenerateReport={handleGenerateReport}
@@ -225,9 +210,11 @@ function App() {
       {view === 'anomalies' && anomalyReport && (
         <AnomaliesPage
           report={anomalyReport}
+          apartments={apartments}
           totalBiens={apartments.length}
           busy={busy}
           onUpdateStatus={handleUpdateAnomalyStatus}
+          onConfigure={handleConfigure}
           onBack={() => setView('parc')}
         />
       )}
@@ -238,7 +225,7 @@ function App() {
           index={selectedIndex}
           onSave={handleSave}
           onBack={() => {
-            setView('parc')
+            setView(returnView)
             setSelectedIndex(null)
           }}
         />

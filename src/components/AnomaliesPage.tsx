@@ -1,17 +1,19 @@
 import { useMemo, useState } from 'react'
 import { formatEuros } from '../format'
-import type { AnomalyReport, AnomalyStatus, FiscalAnomaly } from '../api/contracts'
+import type { AnomalyReport, AnomalyStatus } from '../api/contracts'
+import type { Apartment } from '../types'
+import { buildEntityTree, type BienRow, type EntityNode } from '../lib/entity'
 
 interface AnomaliesPageProps {
   report: AnomalyReport
-  /** Nombre total de biens du parc (pour « % des biens concernés »). */
+  apartments: Apartment[]
   totalBiens: number
   busy: boolean
   onUpdateStatus: (ids: string[], status: AnomalyStatus) => void
+  onConfigure: (index: number) => void
   onBack: () => void
 }
 
-/** Carte de synthèse verte (bandeau « Résultat de votre vérification »). */
 function StatCard({ value, label, prefix }: { value: string; label: string; prefix?: string }) {
   return (
     <div className="flex min-w-[170px] flex-col items-center rounded-2xl bg-emerald-50 px-8 py-5 text-center">
@@ -32,38 +34,159 @@ const STATUS_META: Record<AnomalyStatus, { label: string; cls: string }> = {
 }
 
 const QUICK_ACTIONS: { label: string; status: AnomalyStatus }[] = [
-  { label: 'Confirmer', status: 'confirmed' },
-  { label: 'Justifier', status: 'justified' },
+  { label: 'Confirmée', status: 'confirmed' },
+  { label: 'Justifiée', status: 'justified' },
   { label: 'En attente', status: 'on_hold' },
 ]
 
+function DegrevementPill({ value }: { value: number }) {
+  if (!value) return <span className="text-slate-400">—</span>
+  const surcout = value > 0
+  return (
+    <span
+      className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${
+        surcout ? 'bg-orange-100 text-orange-700' : 'bg-emerald-100 text-emerald-700'
+      }`}
+    >
+      {surcout ? '+ ' : '− '}
+      {formatEuros(Math.abs(value))}
+    </span>
+  )
+}
+
+function Chevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      aria-hidden
+      className={`size-3.5 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M6 4l4 4-4 4" />
+    </svg>
+  )
+}
+
+function DetailsBtn({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
+    >
+      En savoir plus
+    </button>
+  )
+}
+
 export function AnomaliesPage({
   report,
+  apartments,
   totalBiens,
   busy,
   onUpdateStatus,
+  onConfigure,
   onBack,
 }: AnomaliesPageProps) {
-  const [statusFilter, setStatusFilter] = useState<'all' | AnomalyStatus>('all')
-  const [buildingFilter, setBuildingFilter] = useState<string>('all')
-  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [submitted, setSubmitted] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [typeFilter, setTypeFilter] = useState('')
+  const [zoneFilter, setZoneFilter] = useState('')
 
-  const filtered = useMemo(
-    () =>
-      report.anomalies.filter(
-        (a) =>
-          (statusFilter === 'all' || a.status === statusFilter) &&
-          (buildingFilter === 'all' || a.building === buildingFilter),
-      ),
-    [report.anomalies, statusFilter, buildingFilter],
+  // Dégrèvement agrégé par invariant (depuis les anomalies).
+  const degrevByInv = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const a of report.anomalies) {
+      const key = a.invariant.trim().toUpperCase()
+      const delta = a.direction === 'overtaxed' ? -a.impactEuros : a.impactEuros
+      m.set(key, (m.get(key) ?? 0) + delta)
+    }
+    return m
+  }, [report.anomalies])
+
+  // IDs d'anomalies par invariant (pour qualifier en lot par bien).
+  const anomalyIdsByInv = useMemo(() => {
+    const m = new Map<string, string[]>()
+    for (const a of report.anomalies) {
+      const key = a.invariant.trim().toUpperCase()
+      m.set(key, [...(m.get(key) ?? []), a.id])
+    }
+    return m
+  }, [report.anomalies])
+
+  // Statut agrégé par invariant : 'open' si au moins une anomalie l'est.
+  const statusByInv = useMemo(() => {
+    const m = new Map<string, AnomalyStatus>()
+    for (const a of report.anomalies) {
+      const key = a.invariant.trim().toUpperCase()
+      const cur = m.get(key)
+      if (!cur) m.set(key, a.status)
+      else if (a.status === 'open') m.set(key, 'open')
+    }
+    return m
+  }, [report.anomalies])
+
+  // Seuls les biens présents dans le rapport d'anomalies sont affichés.
+  const anomalyInvs = useMemo(
+    () => new Set(report.anomalies.map((a) => a.invariant.trim().toUpperCase())),
+    [report.anomalies],
+  )
+  const filteredApts = useMemo(
+    () => apartments.filter((a) => anomalyInvs.has(String(a.invariant ?? '').trim().toUpperCase())),
+    [apartments, anomalyInvs],
   )
 
-  // Synthèse des 3 cartes (calculée depuis le rapport, jamais codée en dur).
+  // Options pour les filtres.
+  const typeOptions = useMemo(
+    () => [...new Set(filteredApts.map((a) => String(a.natureBien ?? '').trim()).filter(Boolean))].sort(),
+    [filteredApts],
+  )
+  const zoneOptions = useMemo(
+    () => [...new Set(filteredApts.map((a) => String(a.ville ?? '').trim()).filter(Boolean))].sort(),
+    [filteredApts],
+  )
+
+  // Biens affichés après application des filtres.
+  const displayedApts = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase()
+    return filteredApts.filter((a) => {
+      if (typeFilter && String(a.natureBien ?? '').trim() !== typeFilter) return false
+      if (zoneFilter && String(a.ville ?? '').trim() !== zoneFilter) return false
+      if (q) {
+        const text = [a.natureBien, a.rue, a.ville, a.invariant, a.nomImmeuble].join(' ').toLowerCase()
+        if (!text.includes(q)) return false
+      }
+      return true
+    })
+  }, [filteredApts, searchQuery, typeFilter, zoneFilter])
+
+  const rows: BienRow[] = displayedApts.map((apt) => ({
+    index: apartments.indexOf(apt),
+    apt,
+  }))
+  const tree = useMemo(() => buildEntityTree(rows), [displayedApts])
+
+  // Comptage basé sur filteredApts (= ce que le tableau montre), pour que
+  // les pills correspondent exactement aux lignes visibles.
+  const statusCounts = useMemo(() => {
+    const counts: Record<AnomalyStatus, number> = { open: 0, confirmed: 0, justified: 0, on_hold: 0 }
+    for (const apt of filteredApts) {
+      const s = statusByInv.get(String(apt.invariant ?? '').trim().toUpperCase())
+      if (s) counts[s]++
+    }
+    return counts
+  }, [filteredApts, statusByInv])
+
+  // Cartes de synthèse.
   const economie = report.anomalies
     .filter((a) => a.direction === 'overtaxed')
     .reduce((s, a) => s + a.impactEuros, 0)
-  const biensConcernes = new Set(report.anomalies.map((a) => a.invariant)).size
+  const biensConcernes = anomalyInvs.size
   const pctConcernes = totalBiens ? Math.round((100 * biensConcernes) / totalBiens) : 0
   const heures = Math.max(1, Math.round(biensConcernes * 0.5))
   const confirmedCount = report.byStatus.confirmed
@@ -71,23 +194,32 @@ export function AnomaliesPage({
     .filter((a) => a.status === 'confirmed')
     .reduce((s, a) => s + a.impactEuros, 0)
 
-  function toggle(id: string) {
-    setSelected((prev) => {
+  function degrevOf(apt: Apartment) {
+    return degrevByInv.get(String(apt.invariant ?? '').trim().toUpperCase()) ?? 0
+  }
+  function entityDegrev(node: EntityNode) {
+    return node.rows.reduce((s, r) => s + degrevOf(r.apt), 0)
+  }
+  function toggleExpand(key: string) {
+    setExpanded((prev) => {
       const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
       return next
     })
   }
-  function toggleAll() {
-    setSelected((prev) =>
-      prev.size === filtered.length ? new Set() : new Set(filtered.map((a) => a.id)),
-    )
+  function qualify(apt: Apartment, status: AnomalyStatus) {
+    const ids = anomalyIdsByInv.get(String(apt.invariant ?? '').trim().toUpperCase()) ?? []
+    if (ids.length) onUpdateStatus(ids, status)
   }
-  function applyBulk(status: AnomalyStatus) {
-    if (selected.size === 0) return
-    onUpdateStatus([...selected], status)
-    setSelected(new Set())
+  function qualifyEntity(node: EntityNode, status: AnomalyStatus) {
+    const ids = node.rows.flatMap(
+      (r) => anomalyIdsByInv.get(String(r.apt.invariant ?? '').trim().toUpperCase()) ?? [],
+    )
+    if (ids.length) onUpdateStatus(ids, status)
+  }
+  function bienStatus(apt: Apartment): AnomalyStatus | undefined {
+    return statusByInv.get(String(apt.invariant ?? '').trim().toUpperCase())
   }
 
   return (
@@ -100,141 +232,129 @@ export function AnomaliesPage({
         ← Retour au parc
       </button>
 
-      {/* En-tête « Résultat de votre vérification » (page résultat & réclamation). */}
+      {/* En-tête résultat. */}
       <div className="flex flex-col items-center gap-5">
         <h2 className="text-center text-2xl font-semibold text-slate-800">
           Résultat de votre vérification
         </h2>
         <div className="flex flex-wrap items-stretch justify-center gap-4">
-          <StatCard value={formatEuros(economie)} label="d’économie annuelle estimée" />
+          <StatCard value={formatEuros(economie)} label="d'économie annuelle estimée" />
           <StatCard value={`${pctConcernes}%`} label="des biens concernés" />
           <StatCard prefix="environ" value={`${heures}h`} label="de démarche" />
         </div>
         <div className="flex flex-wrap justify-center gap-2 text-xs">
           {(Object.keys(STATUS_META) as AnomalyStatus[]).map((s) => (
             <span key={s} className={`rounded-full px-2.5 py-1 font-medium ${STATUS_META[s].cls}`}>
-              {STATUS_META[s].label} : {report.byStatus[s]}
+              {STATUS_META[s].label} : {statusCounts[s]}
             </span>
           ))}
         </div>
         <p className="mx-auto max-w-3xl text-center text-slate-600">
-          Votre parc immobilier a bien été analysé et les écarts ont été identifiés pour chacun de
-          vos biens. Modifiez si nécessaire les informations détenues par l’administration, puis
-          sélectionnez les anomalies que vous souhaitez contester — classées par enjeu décroissant,
-          l’euro d’abord.
+          Votre parc immobilier a bien été analysé et les écarts ont été identifiés pour chacun de vos biens. Modifiez si nécessaire les informations détenues par l'administration, puis sélectionnez les anomalies que vous souhaitez contester.
         </p>
       </div>
 
       {submitted && (
         <div className="rounded-lg bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">
           ✓ Réclamation prête : {confirmedCount} anomalie{confirmedCount > 1 ? 's' : ''} confirmée
-          {confirmedCount > 1 ? 's' : ''} pour {formatEuros(confirmedEuros)}. Prochaine étape :
-          Décision.
+          {confirmedCount > 1 ? 's' : ''} pour {formatEuros(confirmedEuros)}.
         </div>
       )}
 
       {/* Filtres. */}
-      <div className="flex flex-wrap items-center gap-3 text-sm">
-        <label className="flex items-center gap-2">
-          <span className="text-slate-500">Statut</span>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as 'all' | AnomalyStatus)}
-            className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 outline-none focus:border-emerald-500"
-          >
-            <option value="all">Tous</option>
-            {(Object.keys(STATUS_META) as AnomalyStatus[]).map((s) => (
-              <option key={s} value={s}>
-                {STATUS_META[s].label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex items-center gap-2">
-          <span className="text-slate-500">Bâtiment</span>
-          <select
-            value={buildingFilter}
-            onChange={(e) => setBuildingFilter(e.target.value)}
-            className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 outline-none focus:border-emerald-500"
-          >
-            <option value="all">Tous</option>
-            {report.buildings.map((b) => (
-              <option key={b} value={b}>
-                {b}
-              </option>
-            ))}
-          </select>
-        </label>
-        <span className="text-slate-400">
-          {filtered.length} / {report.anomalies.length} affichée
-          {filtered.length > 1 ? 's' : ''}
-        </span>
-      </div>
-
-      {/* Barre d'actions en lot. */}
-      {selected.size > 0 && (
-        <div className="flex flex-wrap items-center gap-2 rounded-lg bg-slate-800 px-4 py-2.5 text-sm text-white">
-          <span className="font-medium">{selected.size} sélectionnée(s)</span>
-          <span className="text-slate-400">— appliquer en lot :</span>
-          {QUICK_ACTIONS.map((a) => (
-            <button
-              key={a.status}
-              type="button"
-              disabled={busy}
-              onClick={() => applyBulk(a.status)}
-              className="rounded-md bg-white/10 px-2.5 py-1 font-medium transition-colors hover:bg-white/20 disabled:opacity-50"
-            >
-              {a.label}
-            </button>
+      <div className="flex flex-wrap gap-3">
+        <input
+          type="search"
+          placeholder="Rechercher un bien…"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="h-9 rounded-lg border border-slate-300 px-3 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+        />
+        <select
+          value={typeFilter}
+          onChange={(e) => setTypeFilter(e.target.value)}
+          className="h-9 rounded-lg border border-slate-300 px-3 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+        >
+          <option value="">Type de bien</option>
+          {typeOptions.map((t) => (
+            <option key={t} value={t}>{t}</option>
           ))}
+        </select>
+        <select
+          value={zoneFilter}
+          onChange={(e) => setZoneFilter(e.target.value)}
+          className="h-9 rounded-lg border border-slate-300 px-3 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+        >
+          <option value="">Zone géographique</option>
+          {zoneOptions.map((z) => (
+            <option key={z} value={z}>{z}</option>
+          ))}
+        </select>
+        {(searchQuery || typeFilter || zoneFilter) && (
           <button
             type="button"
-            onClick={() => setSelected(new Set())}
-            className="ml-auto text-slate-300 hover:text-white"
+            onClick={() => { setSearchQuery(''); setTypeFilter(''); setZoneFilter('') }}
+            className="h-9 rounded-lg border border-slate-300 px-3 text-sm text-slate-500 hover:text-slate-700 transition-colors"
           >
-            Annuler la sélection
+            Réinitialiser
           </button>
-        </div>
-      )}
+        )}
+      </div>
 
-      {/* Tableau des anomalies (l'enjeu € en premier). */}
+      {/* Tableau groupé par entité. */}
       <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full min-w-[900px] border-collapse text-sm">
+        <table className="w-full min-w-[860px] table-fixed border-collapse text-sm">
+          <colgroup>
+            <col />
+            <col style={{ width: 120 }} />
+            <col style={{ width: 110 }} />
+            <col style={{ width: 168 }} />
+            <col style={{ width: 260 }} />
+            <col style={{ width: 140 }} />
+          </colgroup>
           <thead>
             <tr className="border-b border-slate-200 bg-slate-50 text-left text-slate-600">
-              <th className="px-3 py-3">
-                <input
-                  type="checkbox"
-                  className="accent-emerald-600"
-                  checked={filtered.length > 0 && selected.size === filtered.length}
-                  onChange={toggleAll}
-                  aria-label="Tout sélectionner"
-                />
-              </th>
-              <th className="px-4 py-3 text-right font-medium">Enjeu €</th>
-              <th className="px-4 py-3 font-medium">Bien</th>
-              <th className="px-4 py-3 font-medium">Bâtiment</th>
-              <th className="px-4 py-3 font-medium">Champ</th>
-              <th className="px-4 py-3 font-medium">Cadastre vs Client</th>
-              <th className="px-4 py-3 font-medium">Statut</th>
-              <th className="px-4 py-3 text-right font-medium">Qualifier</th>
+              <th className="px-4 py-3 font-semibold">Vos biens</th>
+              <th className="px-4 py-3 font-semibold">Surface</th>
+              <th className="px-4 py-3 font-semibold">Étage</th>
+              <th className="px-4 py-3 font-semibold">Dégrèvement estimé</th>
+              <th className="px-4 py-3 font-semibold">Qualifier</th>
+              <th className="px-4 py-3" />
             </tr>
           </thead>
           <tbody>
-            {filtered.map((a) => (
-              <AnomalyRow
-                key={a.id}
-                anomaly={a}
-                checked={selected.has(a.id)}
-                busy={busy}
-                onToggle={() => toggle(a.id)}
-                onStatus={(status) => onUpdateStatus([a.id], status)}
-              />
-            ))}
-            {filtered.length === 0 && (
+            {tree.map((node) =>
+              node.type === 'entity' ? (
+                <AnomalyEntityRows
+                  key={node.key}
+                  node={node}
+                  expanded={expanded.has(node.key)}
+                  entityDegrev={entityDegrev(node)}
+                  degrevOf={degrevOf}
+                  bienStatus={bienStatus}
+                  busy={busy}
+                  onToggleExpand={() => toggleExpand(node.key)}
+                  onQualify={qualifyEntity}
+                  onQualifyBien={qualify}
+                  onConfigure={onConfigure}
+                />
+              ) : (
+                <AnomalyBienTr
+                  key={node.key}
+                  row={node.row}
+                  depth={0}
+                  degrev={degrevOf(node.row.apt)}
+                  status={bienStatus(node.row.apt)}
+                  busy={busy}
+                  onQualify={(s) => qualify(node.row.apt, s)}
+                  onConfigure={onConfigure}
+                />
+              ),
+            )}
+            {tree.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
-                  Aucune anomalie pour ces filtres.
+                <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                  Aucune anomalie détectée.
                 </td>
               </tr>
             )}
@@ -242,7 +362,7 @@ export function AnomaliesPage({
         </table>
       </div>
 
-      {/* Pied : retour / finaliser. */}
+      {/* Pied. */}
       <div className="flex flex-wrap items-center justify-end gap-3">
         <button
           type="button"
@@ -255,11 +375,7 @@ export function AnomaliesPage({
           type="button"
           disabled={busy || confirmedCount === 0}
           onClick={() => setSubmitted(true)}
-          title={
-            confirmedCount === 0
-              ? 'Confirmez au moins une anomalie à contester'
-              : 'Finaliser la réclamation'
-          }
+          title={confirmedCount === 0 ? 'Confirmez au moins une anomalie' : 'Finaliser la réclamation'}
           className="rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
         >
           Finaliser ma réclamation
@@ -269,73 +385,141 @@ export function AnomaliesPage({
   )
 }
 
-function AnomalyRow({
-  anomaly,
-  checked,
+function AnomalyEntityRows({
+  node,
+  expanded,
+  entityDegrev,
+  degrevOf,
+  bienStatus,
   busy,
-  onToggle,
-  onStatus,
+  onToggleExpand,
+  onQualify,
+  onQualifyBien,
+  onConfigure,
 }: {
-  anomaly: FiscalAnomaly
-  checked: boolean
+  node: EntityNode
+  expanded: boolean
+  entityDegrev: number
+  degrevOf: (apt: Apartment) => number
+  bienStatus: (apt: Apartment) => AnomalyStatus | undefined
   busy: boolean
-  onToggle: () => void
-  onStatus: (status: AnomalyStatus) => void
+  onToggleExpand: () => void
+  onQualify: (node: EntityNode, status: AnomalyStatus) => void
+  onQualifyBien: (apt: Apartment, status: AnomalyStatus) => void
+  onConfigure: (index: number) => void
 }) {
-  const meta = STATUS_META[anomaly.status]
+  return (
+    <>
+      <tr className="border-b border-slate-100 bg-slate-50/60 hover:bg-slate-50">
+        <td className="px-4 py-3">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onToggleExpand}
+              aria-expanded={expanded}
+              aria-label={expanded ? 'Replier' : 'Déplier'}
+              className="flex size-6 shrink-0 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-200 hover:text-slate-700"
+            >
+              <Chevron open={expanded} />
+            </button>
+            <span className="truncate font-semibold text-slate-800">{node.name}</span>
+            <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+              {node.rows.length}
+            </span>
+          </div>
+        </td>
+        <td className="px-4 py-3 text-slate-500">{node.surface ? `${node.surface} m²` : ''}</td>
+        <td className="px-4 py-3" />
+        <td className="px-4 py-3">
+          <DegrevementPill value={entityDegrev} />
+        </td>
+        <td className="px-4 py-3">
+          <div className="flex flex-wrap gap-1">
+            {QUICK_ACTIONS.map((act) => (
+              <button
+                key={act.status}
+                type="button"
+                disabled={busy}
+                onClick={() => onQualify(node, act.status)}
+                className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
+              >
+                {act.label}
+              </button>
+            ))}
+          </div>
+        </td>
+        <td className="px-4 py-3 text-right">
+          <DetailsBtn onClick={() => onConfigure(node.rows[0].index)} />
+        </td>
+      </tr>
+      {expanded &&
+        node.rows.map((r) => (
+          <AnomalyBienTr
+            key={r.index}
+            row={r}
+            depth={1}
+            degrev={degrevOf(r.apt)}
+            status={bienStatus(r.apt)}
+            busy={busy}
+            onQualify={(s) => onQualifyBien(r.apt, s)}
+            onConfigure={onConfigure}
+          />
+        ))}
+    </>
+  )
+}
+
+function AnomalyBienTr({
+  row,
+  depth,
+  degrev,
+  status,
+  busy,
+  onQualify,
+  onConfigure,
+}: {
+  row: BienRow
+  depth: number
+  degrev: number
+  status: AnomalyStatus | undefined
+  busy: boolean
+  onQualify: (status: AnomalyStatus) => void
+  onConfigure: (index: number) => void
+}) {
+  const apt = row.apt
+  const label =
+    String(apt.natureBien ?? '').trim() ||
+    String(apt.rue ?? '').trim() ||
+    String(apt.invariant ?? '').trim() ||
+    'Bien'
   return (
     <tr className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
-      <td className="px-3 py-3">
-        <input
-          type="checkbox"
-          className="accent-emerald-600"
-          checked={checked}
-          onChange={onToggle}
-          aria-label="Sélectionner"
-        />
-      </td>
-      <td className="px-4 py-3 text-right">
-        <span className="text-base font-bold text-slate-800">{formatEuros(anomaly.impactEuros)}</span>
-        <span
-          className={`ml-1 block text-[11px] font-medium ${
-            anomaly.direction === 'overtaxed' ? 'text-emerald-600' : 'text-orange-600'
-          }`}
-        >
-          {anomaly.direction === 'overtaxed' ? 'trop-perçu' : 'sous-évalué'}
-        </span>
-      </td>
       <td className="px-4 py-3">
-        <div className="font-medium text-slate-700">{anomaly.label}</div>
-        <div className="text-[11px] text-slate-400">{anomaly.invariant}</div>
-      </td>
-      <td className="px-4 py-3 text-slate-600">{anomaly.building}</td>
-      <td className="px-4 py-3 text-slate-600">{anomaly.fieldLabel}</td>
-      <td className="px-4 py-3">
-        <div className="flex items-center gap-2 text-slate-600">
-          <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-600">
-            cadastre <b>{anomaly.cadastralValue}</b>
-          </span>
-          <span className="text-slate-400">→</span>
-          <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-700">
-            client <b>{anomaly.clientValue}</b>
-          </span>
+        <div style={{ paddingLeft: depth ? 28 : 0 }} className="flex items-center gap-2">
+          {depth > 0 && <span className="size-6 shrink-0" aria-hidden />}
+          <div>
+            <div className="truncate text-slate-700">{label}</div>
+            <div className="text-[11px] text-slate-400">{String(apt.invariant ?? '')}</div>
+          </div>
         </div>
       </td>
+      <td className="px-4 py-3 text-slate-600">
+        {apt.surface ? `${apt.surface} m²` : <span className="text-amber-600 text-xs">—</span>}
+      </td>
+      <td className="px-4 py-3 text-slate-600">{String(apt.etage ?? '') || '—'}</td>
       <td className="px-4 py-3">
-        <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${meta.cls}`}>
-          {meta.label}
-        </span>
+        <DegrevementPill value={degrev} />
       </td>
       <td className="px-4 py-3">
-        <div className="flex justify-end gap-1">
+        <div className="flex flex-wrap gap-1">
           {QUICK_ACTIONS.map((act) => (
             <button
               key={act.status}
               type="button"
               disabled={busy}
-              onClick={() => onStatus(act.status)}
+              onClick={() => onQualify(act.status)}
               className={`rounded-md border px-2 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${
-                anomaly.status === act.status
+                status === act.status
                   ? 'border-emerald-600 bg-emerald-600 text-white'
                   : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
               }`}
@@ -344,6 +528,9 @@ function AnomalyRow({
             </button>
           ))}
         </div>
+      </td>
+      <td className="px-4 py-3 text-right">
+        <DetailsBtn onClick={() => onConfigure(row.index)} />
       </td>
     </tr>
   )
