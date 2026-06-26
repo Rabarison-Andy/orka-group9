@@ -117,6 +117,11 @@ export function reconcile(
       matchedKeys.add(k)
       const deltas = computeDeltas(bien, fiche)
       const impactEuros = deltas.reduce((sum, d) => sum + d.impactEuros, 0)
+      // Dégrèvement net signé : sur-taxé = économie (négatif), sous-évalué = surcoût (positif).
+      const degrevementEuros = deltas.reduce(
+        (sum, d) => sum + (d.direction === 'overtaxed' ? -d.impactEuros : d.impactEuros),
+        0,
+      )
       matched.push({
         invariant,
         label: label(bien, fiche, invariant),
@@ -125,6 +130,7 @@ export function reconcile(
         fiscal: fiche,
         hasAnomalies: deltas.length > 0,
         impactEuros,
+        degrevementEuros,
         resolved: true,
       })
     } else {
@@ -136,6 +142,7 @@ export function reconcile(
         bien,
         hasAnomalies: false,
         impactEuros: 0,
+        degrevementEuros: 0,
         resolved: state.resolvedErp.has(k),
         resolution: state.resolvedErp.get(k),
       })
@@ -153,6 +160,7 @@ export function reconcile(
       fiscal: fiche,
       hasAnomalies: false,
       impactEuros: 0,
+      degrevementEuros: 0,
       resolved: state.resolvedFisc.has(k),
       resolution: state.resolvedFisc.get(k),
     })

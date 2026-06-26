@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { AppShell } from './components/AppShell'
 import { ImportZone } from './components/ImportZone'
 import { MappingStep } from './components/MappingStep'
 import { ParcDashboard } from './components/ParcDashboard'
@@ -9,6 +10,7 @@ import {
   reconcile as reconcileApi,
   resolveCase,
   resolveBulk,
+  editBiens,
   generateReport,
   updateAnomalyStatus,
   ApiClientError,
@@ -22,7 +24,6 @@ import type {
   ExtractResponse,
   ReconcileResponse,
   ResolutionAction,
-  ValidationReport,
 } from './api/contracts'
 
 type View = 'import' | 'mapping' | 'parc' | 'form' | 'anomalies'
@@ -31,7 +32,6 @@ function App() {
   const [view, setView] = useState<View>('import')
   const [extract, setExtract] = useState<ExtractResponse | null>(null)
   const [apartments, setApartments] = useState<Apartment[]>([])
-  const [report, setReport] = useState<ValidationReport | null>(null)
   const [reconcileData, setReconcileData] = useState<ReconcileResponse | null>(null)
   const [anomalyReport, setAnomalyReport] = useState<AnomalyReport | null>(null)
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
@@ -56,7 +56,6 @@ function App() {
     try {
       const result = await processMapping(extract.uploadId, mapping)
       setApartments(result.apartments)
-      setReport(result.report)
       const rec = await reconcileApi(extract.uploadId)
       setReconcileData(rec)
       setReportError(null)
@@ -143,17 +142,42 @@ function App() {
     setView('form')
   }
 
-  function handleSave(updated: Apartment) {
-    if (selectedIndex === null) return
-    setApartments((prev) => prev.map((apt, i) => (i === selectedIndex ? updated : apt)))
-    setView('parc')
-    setSelectedIndex(null)
+  /** Applique `changes` (mêmes valeurs) à plusieurs biens, persisté côté serveur. */
+  async function handleBulkEdit(indices: number[], changes: Partial<Apartment>) {
+    if (!extract) return
+    setBusy(true)
+    setReportError(null)
+    try {
+      const res = await editBiens(extract.uploadId, indices, changes)
+      setApartments(res.apartments)
+      setReconcileData(res.reconcile)
+    } catch (err) {
+      setReportError(err instanceof ApiClientError ? err.message : 'Échec de la modification.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleSave(updated: Apartment) {
+    if (selectedIndex === null || !extract) return
+    setBusy(true)
+    try {
+      const res = await editBiens(extract.uploadId, [selectedIndex], updated)
+      setApartments(res.apartments)
+      setReconcileData(res.reconcile)
+    } catch {
+      // repli local si l'API échoue : on garde la saisie
+      setApartments((prev) => prev.map((apt, i) => (i === selectedIndex ? updated : apt)))
+    } finally {
+      setBusy(false)
+      setView('parc')
+      setSelectedIndex(null)
+    }
   }
 
   function handleReset() {
     setExtract(null)
     setApartments([])
-    setReport(null)
     setReconcileData(null)
     setAnomalyReport(null)
     setSelectedIndex(null)
@@ -164,73 +188,62 @@ function App() {
   }
 
   const selected = selectedIndex !== null ? apartments[selectedIndex] : undefined
+  // import/mapping = collecte (0), parc/form = résultat (1), anomalies = décision (2).
+  const step = view === 'import' || view === 'mapping' ? 0 : view === 'anomalies' ? 2 : 1
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-6xl flex-col gap-1 px-4 py-5 sm:px-6">
-          <h1 className="text-xl font-bold tracking-tight text-slate-900">
-            Kadastra — Conseil taxe foncière
-          </h1>
-          <p className="text-sm text-slate-500">
-            Importez votre parc (Excel/CSV), validez le mapping, rapprochez les
-            fiches fiscales, puis traitez les anomalies par enjeu financier.
-          </p>
-        </div>
-      </header>
+    <AppShell step={step} onHome={handleReset}>
+      {view === 'import' && <ImportZone onExtracted={handleExtracted} />}
 
-      <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
-        {view === 'import' && <ImportZone onExtracted={handleExtracted} />}
+      {view === 'mapping' && extract && (
+        <MappingStep
+          extract={extract}
+          onConfirm={handleConfirmMapping}
+          onBack={handleReset}
+          processing={processing}
+          error={mappingError}
+          errorDetails={mappingErrorDetails}
+        />
+      )}
 
-        {view === 'mapping' && extract && (
-          <MappingStep
-            extract={extract}
-            onConfirm={handleConfirmMapping}
-            onBack={handleReset}
-            processing={processing}
-            error={mappingError}
-            errorDetails={mappingErrorDetails}
-          />
-        )}
+      {view === 'parc' && extract && reconcileData && (
+        <ParcDashboard
+          extract={extract}
+          apartments={apartments}
+          reconcile={reconcileData}
+          busy={busy}
+          reportError={reportError}
+          onResolve={handleResolve}
+          onResolveBulk={handleResolveBulk}
+          onBulkEdit={handleBulkEdit}
+          onConfigure={handleConfigure}
+          onReset={handleReset}
+          onGenerateReport={handleGenerateReport}
+        />
+      )}
 
-        {view === 'parc' && extract && reconcileData && (
-          <ParcDashboard
-            extract={extract}
-            apartments={apartments}
-            report={report}
-            reconcile={reconcileData}
-            busy={busy}
-            reportError={reportError}
-            onResolve={handleResolve}
-            onResolveBulk={handleResolveBulk}
-            onConfigure={handleConfigure}
-            onReset={handleReset}
-            onGenerateReport={handleGenerateReport}
-          />
-        )}
+      {view === 'anomalies' && anomalyReport && (
+        <AnomaliesPage
+          report={anomalyReport}
+          totalBiens={apartments.length}
+          busy={busy}
+          onUpdateStatus={handleUpdateAnomalyStatus}
+          onBack={() => setView('parc')}
+        />
+      )}
 
-        {view === 'anomalies' && anomalyReport && (
-          <AnomaliesPage
-            report={anomalyReport}
-            busy={busy}
-            onUpdateStatus={handleUpdateAnomalyStatus}
-            onBack={() => setView('parc')}
-          />
-        )}
-
-        {view === 'form' && selected && selectedIndex !== null && (
-          <ConfigureForm
-            apartment={selected}
-            index={selectedIndex}
-            onSave={handleSave}
-            onBack={() => {
-              setView('parc')
-              setSelectedIndex(null)
-            }}
-          />
-        )}
-      </main>
-    </div>
+      {view === 'form' && selected && selectedIndex !== null && (
+        <ConfigureForm
+          apartment={selected}
+          index={selectedIndex}
+          onSave={handleSave}
+          onBack={() => {
+            setView('parc')
+            setSelectedIndex(null)
+          }}
+        />
+      )}
+    </AppShell>
   )
 }
 

@@ -17,13 +17,15 @@ import cors from 'cors'
 import multer from 'multer'
 import { detectFormat, detectFormatFromContent, extractTableFromBuffer } from './core/parse'
 import { suggestMapping } from './core/mapping'
-import { processRows } from './core/validate'
+import { processRows, coerceCell } from './core/validate'
 import { generateFiscalRecords } from './core/fiscal'
 import { reconcile, generateAnomalies } from './core/reconcile'
 import { saveUpload, getUpload } from './store'
+import { FIELD_BY_KEY, type ApartmentKey } from '../src/types'
 import type {
   AnomalyStatus,
   ApiError,
+  BienEditResponse,
   ConfirmedMapping,
   ExtractResponse,
   FiscalAnomaly,
@@ -287,6 +289,58 @@ app.post(
     }
 
     const body: ReconcileResponse = reconcile(stored.apartments!, stored.fiscal!, state)
+    res.json(body)
+  }),
+)
+
+/**
+ * Édition d'un bien et application de la MÊME modification à plusieurs biens.
+ * `indices` = positions à modifier ; `changes` = champs → nouvelles valeurs.
+ * Persiste côté serveur puis renvoie les biens + le rapprochement recalculé.
+ */
+app.post(
+  '/api/biens/edit',
+  handler((req, res) => {
+    const { uploadId, indices, changes } = (req.body ?? {}) as {
+      uploadId?: unknown
+      indices?: unknown
+      changes?: unknown
+    }
+    const stored = ensureReconcileReady(uploadId, res)
+    if (!stored) return
+    if (!Array.isArray(indices) || indices.length === 0) {
+      sendError(res, 400, 'Paramètre « indices » (liste non vide) requis.')
+      return
+    }
+    if (changes === null || typeof changes !== 'object') {
+      sendError(res, 400, 'Paramètre « changes » invalide.')
+      return
+    }
+
+    const apartments = stored.apartments!
+    // Ne garde que les clés de champ connues ; coerce selon le type.
+    const entries = Object.entries(changes).filter(([k]) => k in FIELD_BY_KEY)
+    let edited = 0
+    for (const idx of indices) {
+      if (typeof idx !== 'number' || idx < 0 || idx >= apartments.length) continue
+      for (const [key, raw] of entries) {
+        const field = FIELD_BY_KEY[key as ApartmentKey]
+        apartments[idx][key as ApartmentKey] = coerceCell(field, raw)
+      }
+      edited++
+    }
+    if (edited === 0) {
+      sendError(res, 400, 'Aucun index de bien valide à modifier.')
+      return
+    }
+
+    // L'édition invalide le rapport déjà généré (les écarts ont changé).
+    stored.anomalies = undefined
+
+    const body: BienEditResponse = {
+      apartments,
+      reconcile: reconcile(apartments, stored.fiscal!, stored.reconcileState!),
+    }
     res.json(body)
   }),
 )

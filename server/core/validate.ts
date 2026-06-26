@@ -105,6 +105,11 @@ function coerce(field: FieldDef, raw: unknown): Coerced {
   }
 }
 
+/** Coerce une valeur selon le type du champ (pour l'édition d'un bien). */
+export function coerceCell(field: FieldDef, raw: unknown): CellValue {
+  return coerce(field, raw).value
+}
+
 /** Champs effectivement mappés à une colonne source valide. */
 function resolveMapping(
   mapping: ConfirmedMapping,

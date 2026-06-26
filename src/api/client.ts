@@ -3,10 +3,12 @@
  * Centralise les appels `fetch`, le parsing JSON et la remontée d'erreurs
  * sous une forme unique (`ApiClientError`) exploitable par les composants.
  */
+import type { Apartment } from '../types'
 import type {
   AnomalyReport,
   AnomalyStatus,
   ApiError,
+  BienEditResponse,
   BulkResolutionAction,
   ConfirmedMapping,
   ExtractResponse,
@@ -117,6 +119,15 @@ export function resolveBulk(
     invariants,
     action,
   })
+}
+
+/** Édite un ou plusieurs biens (même modification appliquée à `indices`). */
+export function editBiens(
+  uploadId: string,
+  indices: number[],
+  changes: Partial<Apartment>,
+): Promise<BienEditResponse> {
+  return postJson<BienEditResponse>('/api/biens/edit', { uploadId, indices, changes })
 }
 
 /** Verrou + génération du rapport d'anomalies (Page 2). */

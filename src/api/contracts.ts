@@ -188,8 +188,14 @@ export interface ReconcileItem {
   fiscal?: FiscalRecord
   /** Vrai si un écart financier existe entre ERP et fisc (cas `matched`). */
   hasAnomalies: boolean
-  /** Impact financier total estimé des écarts de cette ligne (€). */
+  /** Impact financier total estimé des écarts de cette ligne (€, valeur absolue). */
   impactEuros: number
+  /**
+   * Dégrèvement net estimé (€) signé :
+   *   négatif = économie (le fisc sur-taxe, montant récupérable),
+   *   positif = surcoût (le fisc sous-évalue).
+   */
+  degrevementEuros: number
   resolved: boolean
   resolution?: ResolutionAction
 }
@@ -230,6 +236,23 @@ export interface ResolveBulkRequest {
   side: 'erp_only' | 'fisc_only'
   invariants: string[]
   action: BulkResolutionAction
+}
+
+/**
+ * Corps de `POST /api/biens/edit` — applique `changes` à TOUS les biens visés.
+ * `indices` = positions dans le tableau `apartments` (1 = édition simple,
+ * plusieurs = édition en lot « une modif appliquée à plusieurs biens »).
+ */
+export interface BienEditRequest {
+  uploadId: string
+  indices: number[]
+  changes: Partial<Apartment>
+}
+
+/** Réponse de `POST /api/biens/edit` : biens à jour + rapprochement recalculé. */
+export interface BienEditResponse {
+  apartments: Apartment[]
+  reconcile: ReconcileResponse
 }
 
 /* ================================================================== *

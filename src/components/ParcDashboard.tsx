@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { ApartmentTable } from './ApartmentTable'
+import { useMemo, useState, type ReactNode } from 'react'
+import { BiensTable } from './BiensTable'
 import { formatEuros, display } from '../format'
 import type { Apartment } from '../types'
 import type {
@@ -8,13 +8,11 @@ import type {
   ReconcileItem,
   ReconcileResponse,
   ResolutionAction,
-  ValidationReport,
 } from '../api/contracts'
 
 interface ParcDashboardProps {
   extract: ExtractResponse
   apartments: Apartment[]
-  report: ValidationReport | null
   reconcile: ReconcileResponse
   busy: boolean
   reportError?: string | null
@@ -29,6 +27,7 @@ interface ParcDashboardProps {
     invariants: string[],
     action: BulkResolutionAction,
   ) => void
+  onBulkEdit: (indices: number[], changes: Partial<Apartment>) => void
   onConfigure: (index: number) => void
   onReset: () => void
   onGenerateReport: () => void
@@ -45,11 +44,49 @@ const ACCEPT: Record<
 
 type Tab = 'restitution' | 'matched' | 'erp_only' | 'fisc_only'
 
-function Stat({ label, value, tone }: { label: string; value: number; tone: string }) {
+/** Boutons de pied de page : revenir en arrière / configurer la réclamation. */
+function ReportActions({
+  canGenerate,
+  busy,
+  unresolved,
+  onReset,
+  onGenerate,
+}: {
+  canGenerate: boolean
+  busy: boolean
+  unresolved: number
+  onReset: () => void
+  onGenerate: () => void
+}) {
   return (
-    <div className={`flex flex-col rounded-lg px-3 py-2 ${tone}`}>
-      <span className="text-lg font-bold leading-none">{value}</span>
-      <span className="text-[11px] font-medium">{label}</span>
+    <div className="flex flex-col items-end gap-1.5">
+      <div className="flex flex-wrap items-center justify-end gap-3">
+        <button
+          type="button"
+          onClick={onReset}
+          className="rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
+        >
+          Modifier ma vérification
+        </button>
+        <button
+          type="button"
+          disabled={!canGenerate || busy}
+          onClick={onGenerate}
+          title={
+            canGenerate
+              ? 'Configurer le dossier de réclamation'
+              : 'Résolvez d’abord les cas non appariés (ERP / Fisc)'
+          }
+          className="rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+        >
+          {busy ? 'Traitement…' : 'Configurer mon dossier de réclamation'}
+        </button>
+      </div>
+      {!canGenerate && (
+        <span className="text-xs text-amber-600">
+          ⚠ {unresolved} cas non appariés (ERP / Fisc) à résoudre pour débloquer la réclamation.
+        </span>
+      )}
     </div>
   )
 }
@@ -75,9 +112,8 @@ function ResolveActions({
   busy: boolean
   onResolve: ParcDashboardProps['onResolve']
 }) {
-  const btn =
-    'rounded-md border px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-50'
-  const active = 'border-indigo-600 bg-indigo-600 text-white'
+  const btn = 'rounded-md border px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-50'
+  const active = 'border-emerald-600 bg-emerald-600 text-white'
   const idle = 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
   const accept = ACCEPT[side]
   return (
@@ -106,9 +142,7 @@ function ResolveActions({
       <select
         disabled={busy || targets.length === 0}
         value=""
-        onChange={(e) =>
-          e.target.value && onResolve(item.invariant, side, 'attach', e.target.value)
-        }
+        onChange={(e) => e.target.value && onResolve(item.invariant, side, 'attach', e.target.value)}
         className={`${btn} ${item.resolution === 'attach' ? active : idle} cursor-pointer`}
         title={
           targets.length === 0
@@ -132,18 +166,27 @@ function ResolveActions({
 export function ParcDashboard({
   extract,
   apartments,
-  report,
   reconcile,
   busy,
   reportError = null,
   onResolve,
   onResolveBulk,
+  onBulkEdit,
   onConfigure,
   onReset,
   onGenerateReport,
 }: ParcDashboardProps) {
   const [tab, setTab] = useState<Tab>('restitution')
   const { counts, canGenerateReport } = reconcile
+
+  // Dégrèvement net par invariant (pour la colonne « Dégrèvement estimé »).
+  const degrevByInv = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const it of reconcile.matched) {
+      m.set(it.invariant.trim().toUpperCase(), it.degrevementEuros)
+    }
+    return m
+  }, [reconcile.matched])
 
   const tabs: { id: Tab; label: string; count?: number }[] = [
     { id: 'restitution', label: 'Restitution' },
@@ -152,54 +195,26 @@ export function ParcDashboard({
     { id: 'fisc_only', label: 'Fisc uniquement', count: counts.fiscOnly },
   ]
 
-  return (
-    <div className="flex flex-col gap-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex flex-col gap-1">
-          <h2 className="text-xl font-semibold text-slate-800">
-            Parc immobilier — rapprochement Fisc / ERP
-          </h2>
-          <p className="text-sm text-slate-500">
-            {extract.filename} · {apartments.length} biens · rapprochés aux fiches
-            fiscales par invariant.
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <button
-            type="button"
-            onClick={onReset}
-            className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
-          >
-            Importer un autre fichier
-          </button>
-          <button
-            type="button"
-            disabled={!canGenerateReport || busy}
-            onClick={onGenerateReport}
-            title={
-              canGenerateReport
-                ? 'Générer le rapport d’anomalies'
-                : 'Résolvez d’abord tous les cas non appariés'
-            }
-            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-          >
-            {busy ? 'Traitement…' : 'Générer mon rapport →'}
-          </button>
-        </div>
-      </div>
+  const reportActions: ReactNode = (
+    <ReportActions
+      canGenerate={canGenerateReport}
+      busy={busy}
+      unresolved={counts.unresolved}
+      onReset={onReset}
+      onGenerate={onGenerateReport}
+    />
+  )
 
-      {/* Verrou de transition. */}
-      {canGenerateReport ? (
-        <div className="rounded-lg bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">
-          ✓ Parc réconcilié — aucun cas en suspens. Le rapport d’anomalies est
-          déverrouillé.
-        </div>
-      ) : (
-        <div className="rounded-lg bg-amber-50 px-4 py-3 text-sm font-medium text-amber-700">
-          ⚠ {counts.unresolved} cas de rapprochement à résoudre (ERP uniquement /
-          Fisc uniquement) avant de pouvoir générer le rapport.
-        </div>
-      )}
+  return (
+    <div className="flex flex-col gap-6">
+      {/* En-tête du parc (étape collecte / rapprochement Fisc-ERP). */}
+      <div className="flex flex-col gap-1">
+        <h2 className="text-xl font-semibold text-slate-800">Votre parc immobilier</h2>
+        <p className="text-sm text-slate-500">
+          {extract.filename} · {apartments.length} biens · vérifiez et complétez vos biens, puis
+          résolvez les écarts Fisc / ERP avant de configurer votre réclamation.
+        </p>
+      </div>
 
       {reportError && (
         <div className="rounded-lg bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
@@ -207,15 +222,7 @@ export function ParcDashboard({
         </div>
       )}
 
-      {/* Statistiques de rapprochement. */}
-      <div className="flex flex-wrap gap-2">
-        <Stat label="Appariés" value={counts.matched} tone="bg-emerald-50 text-emerald-700" />
-        <Stat label="Avec écart €" value={counts.withAnomalies} tone="bg-amber-50 text-amber-700" />
-        <Stat label="ERP uniquement" value={counts.erpOnly} tone="bg-sky-50 text-sky-700" />
-        <Stat label="Fisc uniquement" value={counts.fiscOnly} tone="bg-violet-50 text-violet-700" />
-      </div>
-
-      {/* Onglets. */}
+      {/* Onglets : restitution + détail du rapprochement Fisc / ERP. */}
       <div className="flex flex-wrap gap-1 border-b border-slate-200">
         {tabs.map((t) => (
           <button
@@ -224,7 +231,7 @@ export function ParcDashboard({
             onClick={() => setTab(t.id)}
             className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
               tab === t.id
-                ? 'border-indigo-600 text-indigo-700'
+                ? 'border-emerald-600 text-emerald-700'
                 : 'border-transparent text-slate-500 hover:text-slate-700'
             }`}
           >
@@ -239,41 +246,53 @@ export function ParcDashboard({
       </div>
 
       {tab === 'restitution' && (
-        <ApartmentTable
+        <BiensTable
           apartments={apartments}
-          report={report}
+          busy={busy}
+          degrevement={degrevByInv}
+          actions={reportActions}
           onConfigure={onConfigure}
-          onReset={onReset}
-          embedded
+          onBulkEdit={onBulkEdit}
         />
       )}
 
-      {tab === 'matched' && <MatchedTable items={reconcile.matched} />}
+      {tab === 'matched' && (
+        <div className="flex flex-col gap-4">
+          <MatchedTable items={reconcile.matched} />
+          <div className="flex justify-end">{reportActions}</div>
+        </div>
+      )}
 
       {tab === 'erp_only' && (
-        <UnmatchedTable
-          items={reconcile.erpOnly}
-          side="erp_only"
-          targets={reconcile.fiscOnly}
-          busy={busy}
-          onResolve={onResolve}
-          onResolveBulk={onResolveBulk}
-          help="Ces biens de votre fichier sont inconnus du fisc. Conservez-les (les garder dans le parc), excluez-les, ou rattachez-les à une fiche fiscale orpheline."
-          emptyLabel="Aucun bien « ERP uniquement »."
-        />
+        <div className="flex flex-col gap-4">
+          <UnmatchedTable
+            items={reconcile.erpOnly}
+            side="erp_only"
+            targets={reconcile.fiscOnly}
+            busy={busy}
+            onResolve={onResolve}
+            onResolveBulk={onResolveBulk}
+            help="Ces biens de votre fichier sont inconnus du fisc. Conservez-les (les garder dans le parc), excluez-les, ou rattachez-les à une fiche fiscale orpheline."
+            emptyLabel="Aucun bien « ERP uniquement »."
+          />
+          <div className="flex justify-end">{reportActions}</div>
+        </div>
       )}
 
       {tab === 'fisc_only' && (
-        <UnmatchedTable
-          items={reconcile.fiscOnly}
-          side="fisc_only"
-          targets={reconcile.erpOnly}
-          busy={busy}
-          onResolve={onResolve}
-          onResolveBulk={onResolveBulk}
-          help="Le fisc taxe ces biens absents de votre fichier. Importez-les (les ajouter au parc), excluez-les, ou rattachez-les à un de vos biens orphelins."
-          emptyLabel="Aucune fiche « Fisc uniquement »."
-        />
+        <div className="flex flex-col gap-4">
+          <UnmatchedTable
+            items={reconcile.fiscOnly}
+            side="fisc_only"
+            targets={reconcile.erpOnly}
+            busy={busy}
+            onResolve={onResolve}
+            onResolveBulk={onResolveBulk}
+            help="Le fisc taxe ces biens absents de votre fichier. Importez-les (les ajouter au parc), excluez-les, ou rattachez-les à un de vos biens orphelins."
+            emptyLabel="Aucune fiche « Fisc uniquement »."
+          />
+          <div className="flex justify-end">{reportActions}</div>
+        </div>
       )}
     </div>
   )
@@ -417,6 +436,7 @@ function UnmatchedTable({
               <th className="px-3 py-3">
                 <input
                   type="checkbox"
+                  className="accent-emerald-600"
                   checked={selected.size === items.length}
                   onChange={toggleAll}
                   aria-label="Tout sélectionner"
@@ -441,6 +461,7 @@ function UnmatchedTable({
                   <td className="px-3 py-3">
                     <input
                       type="checkbox"
+                      className="accent-emerald-600"
                       checked={selected.has(it.invariant)}
                       onChange={() => toggle(it.invariant)}
                       aria-label="Sélectionner"
