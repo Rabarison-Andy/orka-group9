@@ -1,24 +1,9 @@
-/**
- * Étape 2 du pipeline — moteur de mapping automatique.
- *
- * Objectif : pour chaque champ interne Kadastra, proposer la colonne source la
- * plus probable du fichier client, avec un score de confiance et une raison.
- *
- * Stratégie en cascade (du plus sûr au plus permissif) :
- *   1. correspondance EXACTE avec le libellé officiel du champ        → 1.00
- *   2. correspondance EXACTE avec un alias/synonyme connu             → 0.95
- *   3. correspondance FLOUE (tokens + distance d'édition)             → < 0.90
- * Puis affectation gloutonne : on attribue les meilleures paires d'abord, en
- * garantissant qu'une colonne et un champ ne sont utilisés qu'une seule fois.
- */
 import { FIELDS } from '../../src/types'
 import type { ApartmentKey } from '../../src/types'
 import type { MappingSuggestion, MatchReason } from '../../src/api/contracts'
 
-/** Seuil minimal de confiance pour proposer une correspondance floue. */
 const FUZZY_THRESHOLD = 0.62
 
-/** Minuscule, sans accents, sans ponctuation, espaces compactés. */
 function normalize(text: string): string {
   return text
     .normalize('NFD')
@@ -33,7 +18,6 @@ function tokenize(text: string): string[] {
   return normalize(text).split(' ').filter(Boolean)
 }
 
-/** Distance de Levenshtein classique (programmation dynamique). */
 function levenshtein(a: string, b: string): number {
   if (a === b) return 0
   if (a.length === 0) return b.length
@@ -53,14 +37,12 @@ function levenshtein(a: string, b: string): number {
   return prev[b.length]
 }
 
-/** Similarité caractères ∈ [0,1] dérivée de la distance d'édition. */
 function charRatio(a: string, b: string): number {
   const maxLen = Math.max(a.length, b.length)
   if (maxLen === 0) return 1
   return 1 - levenshtein(a, b) / maxLen
 }
 
-/** Similarité tokens : combine Jaccard et taux de recouvrement du plus court. */
 function tokenSim(a: string[], b: string[]): number {
   if (a.length === 0 || b.length === 0) return 0
   const setA = new Set(a)
@@ -73,7 +55,6 @@ function tokenSim(a: string[], b: string[]): number {
   return Math.max(jaccard, 0.9 * containment)
 }
 
-/** Libellés candidats d'un champ (officiel + alias + libellé UI). */
 function candidateLabels(field: (typeof FIELDS)[number]): string[] {
   return [field.excel, field.label, ...(field.aliases ?? [])]
 }
@@ -85,7 +66,6 @@ interface Scored {
   reason: MatchReason
 }
 
-/** Meilleur score d'un champ pour une colonne donnée. */
 function scoreFieldColumn(
   field: (typeof FIELDS)[number],
   header: string,
@@ -93,16 +73,13 @@ function scoreFieldColumn(
   const normHeader = normalize(header)
   if (normHeader === '') return { confidence: 0, reason: 'none' }
 
-  // 1. Exact sur le libellé officiel.
   if (normHeader === normalize(field.excel)) return { confidence: 1, reason: 'exact' }
 
-  // 2. Exact sur un alias / libellé UI.
   const aliasHit = [field.label, ...(field.aliases ?? [])].some(
     (label) => normalize(label) === normHeader,
   )
   if (aliasHit) return { confidence: 0.95, reason: 'alias' }
 
-  // 3. Flou : meilleure similarité sur l'ensemble des libellés candidats.
   const headerTokens = tokenize(header)
   let best = 0
   for (const label of candidateLabels(field)) {
@@ -112,16 +89,10 @@ function scoreFieldColumn(
     )
     if (sim > best) best = sim
   }
-  // Plafonné sous 0.9 pour rester sous les correspondances exactes/alias.
   return { confidence: Math.min(best, 0.89), reason: 'fuzzy' }
 }
 
-/**
- * Propose un mapping pour TOUS les champs internes à partir des en-têtes du
- * fichier. Affectation gloutonne : 1 colonne ↔ 1 champ au maximum.
- */
 export function suggestMapping(headers: string[]): MappingSuggestion[] {
-  // 1. Calcule toutes les paires (champ, colonne) au-dessus du seuil.
   const candidates: Scored[] = []
   for (const field of FIELDS) {
     headers.forEach((header, columnIndex) => {
@@ -134,7 +105,6 @@ export function suggestMapping(headers: string[]): MappingSuggestion[] {
     })
   }
 
-  // 2. Affectation gloutonne par confiance décroissante.
   candidates.sort((a, b) => b.confidence - a.confidence)
   const fieldTaken = new Set<ApartmentKey>()
   const columnTaken = new Set<number>()
@@ -147,7 +117,6 @@ export function suggestMapping(headers: string[]): MappingSuggestion[] {
     columnTaken.add(cand.columnIndex)
   }
 
-  // 3. Une suggestion par champ (colonne nulle si rien trouvé).
   return FIELDS.map((field) => {
     const hit = chosen.get(field.key)
     return hit

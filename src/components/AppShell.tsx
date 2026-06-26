@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react'
 
 interface AppShellProps {
-  /** 0 = Collecte, 1 = Résultat & réclamation, 2 = Décision. */
   step: 0 | 1 | 2
   onHome: () => void
   children: ReactNode
@@ -35,7 +34,6 @@ function Stepper({ step }: { step: 0 | 1 | 2 }) {
   )
 }
 
-/** Icône simple de la barre latérale. */
 function SideIcon({
   title,
   onClick,
@@ -60,7 +58,6 @@ function SideIcon({
 export function AppShell({ step, onHome, children }: AppShellProps) {
   return (
     <div className="flex min-h-screen bg-slate-50 text-slate-900">
-      {/* Barre latérale. */}
       <aside className="flex w-16 flex-col items-center gap-6 bg-[#14361f] py-5">
         <button
           type="button"
@@ -97,7 +94,6 @@ export function AppShell({ step, onHome, children }: AppShellProps) {
         </SideIcon>
       </aside>
 
-      {/* Colonne principale. */}
       <div className="flex flex-1 flex-col">
         <header className="grid grid-cols-3 items-center border-b border-slate-200 bg-white px-6 py-4">
           <div />

@@ -36,26 +36,17 @@ export type FieldGroup =
 
 export interface FieldDef {
   key: ApartmentKey
-  /** Libellé exact (trimé) de la colonne dans le fichier source. */
   excel: string
-  /** Libellé affiché dans l'UI. */
   label: string
   group: FieldGroup
   type: FieldType
   options?: readonly string[]
-  /** Colonne obligatoire : doit être mappée et renseignée. */
   required?: boolean
-  /**
-   * Synonymes/variantes de libellés rencontrés dans les fichiers clients.
-   * Servent au moteur de mapping automatique (en plus du libellé `excel`).
-   */
   aliases?: readonly string[]
 }
 
-/** Une valeur de cellule : texte, nombre, ou vide. */
 export type CellValue = string | number
 
-/** Un bien = un dictionnaire de valeurs indexé par clé de champ. */
 export type Apartment = Record<ApartmentKey, CellValue>
 
 export const NATURE_OPTIONS = [
@@ -66,10 +57,6 @@ export const NATURE_OPTIONS = [
   'Dépendance',
 ] as const
 
-/**
- * Source de vérité unique : décrit chaque champ une seule fois.
- * Sert à la fois au parsing Excel, au tableau et au formulaire généré.
- */
 export const FIELDS: readonly FieldDef[] = [
   { key: 'invariant', excel: 'Invariant', label: 'Invariant', group: 'Identification & adresse', type: 'text', required: true, aliases: ['Numéro invariant', 'N° invariant', 'Invariant cadastral', 'Identifiant fiscal', 'Identifiant cadastral', 'Référence cadastrale', 'Réf cadastrale', 'Parcelle', 'Référence', 'Ref', 'ID'] },
   { key: 'rue', excel: 'Rue', label: 'Rue', group: 'Identification & adresse', type: 'text', required: true, aliases: ['Adresse', 'Adresse du bien', 'Voie', 'Libellé voie', 'Numéro et rue', 'Numéro et voie'] },
@@ -92,7 +79,7 @@ export const FIELDS: readonly FieldDef[] = [
   { key: 'eauCourante', excel: 'Eau courante (1/0)', label: 'Eau courante', group: 'Équipements & raccordements', type: 'binaire', aliases: ['Eau courante', 'Eau'] },
   { key: 'gaz', excel: 'Raccordement au gaz (1/0)', label: 'Raccordement au gaz', group: 'Équipements & raccordements', type: 'binaire', aliases: ['Gaz', 'Raccordement gaz'] },
   { key: 'electricite', excel: "Raccordement à l'électricité (1/0)", label: "Raccordement à l'électricité", group: 'Équipements & raccordements', type: 'binaire', aliases: ['Électricité', 'Electricite', 'Raccordement électricité'] },
-  { key: 'egout', excel: "Raccordement à l'égout (1/0)", label: "Raccordement à l'égout", group: 'Équipements & raccordements', type: 'binaire', aliases: ['Égout', 'Egout', 'Tout à l’égout', 'Assainissement'] },
+  { key: 'egout', excel: "Raccordement à l'égout (1/0)", label: "Raccordement à l'égout", group: 'Équipements & raccordements', type: 'binaire', aliases: ['Égout', 'Egout', `Tout à l'égout`, 'Assainissement'] },
   { key: 'nbVideOrdures', excel: 'Nombre de vide-ordures', label: 'Nombre de vide-ordures', group: 'Équipements & raccordements', type: 'number', aliases: ['Vide-ordures', 'Vide ordures'] },
 
   { key: 'nbBaignoires', excel: 'Nombre de baignoires', label: 'Baignoires', group: 'Sanitaires', type: 'number', aliases: ['Baignoires', 'Baignoire'] },
@@ -102,7 +89,6 @@ export const FIELDS: readonly FieldDef[] = [
   { key: 'nbEviers', excel: "Nombre d'éviers", label: 'Éviers', group: 'Sanitaires', type: 'number', aliases: ['Éviers', 'Eviers', 'Evier'] },
 ]
 
-/** Accès rapide à un champ par sa clé. */
 export const FIELD_BY_KEY: Readonly<Record<ApartmentKey, FieldDef>> = FIELDS.reduce(
   (acc, f) => {
     acc[f.key] = f
@@ -111,7 +97,6 @@ export const FIELD_BY_KEY: Readonly<Record<ApartmentKey, FieldDef>> = FIELDS.red
   {} as Record<ApartmentKey, FieldDef>,
 )
 
-/** Ordre d'affichage des sections du formulaire. */
 export const FIELD_GROUPS: readonly FieldGroup[] = [
   'Identification & adresse',
   'Caractéristiques',
@@ -120,7 +105,6 @@ export const FIELD_GROUPS: readonly FieldGroup[] = [
   'Sanitaires',
 ]
 
-/** Colonnes résumées affichées dans le tableau. */
 export const TABLE_COLUMNS: readonly ApartmentKey[] = [
   'invariant',
   'rue',
@@ -131,12 +115,10 @@ export const TABLE_COLUMNS: readonly ApartmentKey[] = [
   'nbPieces',
 ]
 
-/** Champs obligatoires (colonne devant être mappée + valeur attendue). */
 export const REQUIRED_FIELDS: readonly ApartmentKey[] = FIELDS.filter(
   (f) => f.required,
 ).map((f) => f.key)
 
-/** Crée un bien vide (toutes valeurs à ''). */
 export function emptyApartment(): Apartment {
   return FIELDS.reduce((acc, f) => {
     acc[f.key] = ''
@@ -144,7 +126,6 @@ export function emptyApartment(): Apartment {
   }, {} as Apartment)
 }
 
-/** Vrai si la valeur est considérée « renseignée » (non vide). */
 export function isFilled(value: CellValue): boolean {
   return value !== '' && value !== null && value !== undefined
 }

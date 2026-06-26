@@ -10,9 +10,7 @@ import { buildEntityTree, type BienRow, type EntityNode } from '../lib/entity'
 
 interface BiensTableProps {
   apartments: Apartment[]
-  /** Dégrèvement net signé par invariant (négatif = économie, positif = surcoût). */
   degrevement?: Map<string, number>
-  /** Actions de pied de page (boutons de réclamation), rendues sous le tableau. */
   actions?: ReactNode
   onConfigure: (index: number) => void
 }
@@ -24,12 +22,10 @@ const COLUMNS: { key: ColKey; label: string; field: ApartmentKey; width: number 
   { key: 'etage', label: 'Etage', field: 'etage', width: 110 },
 ]
 
-/** Clé de rapprochement normalisée (alignée sur le serveur). */
 function invKey(apt: Apartment): string {
   return String(apt.invariant ?? '').trim().toUpperCase()
 }
 
-/** Libellé d'un bien dans la colonne « Vos biens ». */
 function bienLabel(apt: Apartment): string {
   return (
     String(apt.natureBien ?? '').trim() ||
@@ -39,7 +35,6 @@ function bienLabel(apt: Apartment): string {
   )
 }
 
-/** Chevron simple qui pivote à l'ouverture (pas de saut de mise en page). */
 function Chevron({ open }: { open: boolean }) {
   return (
     <svg
@@ -57,7 +52,6 @@ function Chevron({ open }: { open: boolean }) {
   )
 }
 
-/** Pastille « Dégrèvement estimé » : vert = économie, orange = surcoût. */
 function DegrevementPill({ value }: { value: number }) {
   if (!value) return <span className="text-slate-400">—</span>
   const surcout = value > 0
@@ -73,7 +67,6 @@ function DegrevementPill({ value }: { value: number }) {
   )
 }
 
-/** Valeur d'une cellule : valeur formatée si remplie, pastille « manquant » sinon. */
 function CellValueView({ apt, col }: { apt: Apartment; col: (typeof COLUMNS)[number] }) {
   const value = apt[col.field]
   if (isFilled(value)) {
@@ -91,7 +84,6 @@ function CellValueView({ apt, col }: { apt: Apartment; col: (typeof COLUMNS)[num
   )
 }
 
-/** Case à cocher à 3 états (cochée / partielle / vide). */
 function TriCheckbox({ state, onChange }: { state: 'all' | 'some' | 'none'; onChange: () => void }) {
   return (
     <input
@@ -134,7 +126,6 @@ export function BiensTable({
     [apartments],
   )
 
-  // Filtrage au niveau bien, puis regroupement en entités.
   const tree = useMemo(() => {
     const q = search.trim().toLowerCase()
     const rows: BienRow[] = apartments
@@ -158,7 +149,6 @@ export function BiensTable({
   const pageNodes = tree.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE)
   const activeCols = COLUMNS.filter((c) => visibleCols[c.key])
 
-  // Sélection.
   function toggleBien(index: number) {
     setSelected((prev) => {
       const next = new Set(prev)
@@ -213,7 +203,6 @@ export function BiensTable({
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Filtres. */}
       <div className="flex flex-wrap items-end gap-4">
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-slate-500">type de bien</span>
@@ -290,8 +279,6 @@ export function BiensTable({
         </div>
       </div>
 
-      {/* Table arborescente groupée par entité. Largeurs fixes : déplier un lot
-          ne recalcule jamais les colonnes (pas de décalage brutal). */}
       <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
         <table className="w-full min-w-[880px] table-fixed border-collapse text-sm">
           <colgroup>
@@ -360,10 +347,8 @@ export function BiensTable({
         </table>
       </div>
 
-      {/* Actions de réclamation (slot fourni par la page). */}
       {actions && <div className="flex justify-end">{actions}</div>}
 
-      {/* Pied : sélection + pagination. */}
       <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-500">
         <span>
           {selected.size} of {apartments.length} row(s) selected.
@@ -405,7 +390,6 @@ function PageBtn({ label, disabled, onClick }: { label: string; disabled: boolea
   )
 }
 
-/** Ligne entité (parent) + ses lots (enfants) si déplié. */
 function EntityRows({
   node,
   expanded,
@@ -487,8 +471,6 @@ function EntityRows({
   )
 }
 
-/** Ligne d'un bien (lot ou autonome). L'indentation se fait DANS les cellules
-    (largeurs de colonnes figées) pour éviter tout décalage à l'ouverture. */
 function BienTr({
   row,
   depth,

@@ -1,18 +1,5 @@
-/**
- * Lien logique de regroupement des biens en ENTITÉS.
- *
- * Un bailleur possède des « entités » (immeubles / adresses) qui regroupent
- * plusieurs lots (appartement, parking, cave…). On dérive ce lien des données
- * — il n'est PAS codé en dur :
- *   1. `Nom de l'immeuble` s'il est renseigné ;
- *   2. sinon repli sur l'adresse (`Rue` + `Ville`).
- * Un bien sans aucun de ces repères reste autonome.
- *
- * Pour changer la règle de regroupement, il suffit de modifier ce seul fichier.
- */
 import type { Apartment } from '../types'
 
-/** Clé d'entité normalisée (vide = bien autonome, non regroupable). */
 export function entityKey(apt: Apartment): string {
   const imm = String(apt.nomImmeuble ?? '').trim().toLowerCase()
   if (imm) return `imm:${imm}`
@@ -22,7 +9,6 @@ export function entityKey(apt: Apartment): string {
   return ''
 }
 
-/** Libellé lisible de l'entité d'un bien. */
 export function entityName(apt: Apartment): string {
   const imm = String(apt.nomImmeuble ?? '').trim()
   if (imm) return imm
@@ -41,7 +27,6 @@ export interface EntityNode {
   key: string
   name: string
   rows: BienRow[]
-  /** Somme des surfaces numériques des lots. */
   surface: number
 }
 
@@ -53,11 +38,6 @@ export interface BienNode {
 
 export type TreeNode = EntityNode | BienNode
 
-/**
- * Regroupe des biens (avec leur index d'origine) en arbre :
- * une entité dès qu'au moins 2 biens partagent la même clé logique, sinon le
- * bien reste autonome. L'ordre d'apparition est préservé.
- */
 export function buildEntityTree(rows: BienRow[]): TreeNode[] {
   const groups = new Map<string, BienRow[]>()
   const order: string[] = []

@@ -98,7 +98,6 @@ export function AnomaliesPage({
   const [typeFilter, setTypeFilter] = useState('')
   const [zoneFilter, setZoneFilter] = useState('')
 
-  // Dégrèvement agrégé par invariant (depuis les anomalies).
   const degrevByInv = useMemo(() => {
     const m = new Map<string, number>()
     for (const a of report.anomalies) {
@@ -109,7 +108,6 @@ export function AnomaliesPage({
     return m
   }, [report.anomalies])
 
-  // IDs d'anomalies par invariant (pour qualifier en lot par bien).
   const anomalyIdsByInv = useMemo(() => {
     const m = new Map<string, string[]>()
     for (const a of report.anomalies) {
@@ -119,7 +117,6 @@ export function AnomaliesPage({
     return m
   }, [report.anomalies])
 
-  // Statut agrégé par invariant : 'open' si au moins une anomalie l'est.
   const statusByInv = useMemo(() => {
     const m = new Map<string, AnomalyStatus>()
     for (const a of report.anomalies) {
@@ -131,7 +128,6 @@ export function AnomaliesPage({
     return m
   }, [report.anomalies])
 
-  // Seuls les biens présents dans le rapport d'anomalies sont affichés.
   const anomalyInvs = useMemo(
     () => new Set(report.anomalies.map((a) => a.invariant.trim().toUpperCase())),
     [report.anomalies],
@@ -141,7 +137,6 @@ export function AnomaliesPage({
     [apartments, anomalyInvs],
   )
 
-  // Options pour les filtres.
   const typeOptions = useMemo(
     () => [...new Set(filteredApts.map((a) => String(a.natureBien ?? '').trim()).filter(Boolean))].sort(),
     [filteredApts],
@@ -151,7 +146,6 @@ export function AnomaliesPage({
     [filteredApts],
   )
 
-  // Biens affichés après application des filtres.
   const displayedApts = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()
     return filteredApts.filter((a) => {
@@ -171,8 +165,6 @@ export function AnomaliesPage({
   }))
   const tree = useMemo(() => buildEntityTree(rows), [displayedApts])
 
-  // Comptage basé sur filteredApts (= ce que le tableau montre), pour que
-  // les pills correspondent exactement aux lignes visibles.
   const statusCounts = useMemo(() => {
     const counts: Record<AnomalyStatus, number> = { open: 0, confirmed: 0, justified: 0, on_hold: 0 }
     for (const apt of filteredApts) {
@@ -182,7 +174,6 @@ export function AnomaliesPage({
     return counts
   }, [filteredApts, statusByInv])
 
-  // Cartes de synthèse.
   const economie = report.anomalies
     .filter((a) => a.direction === 'overtaxed')
     .reduce((s, a) => s + a.impactEuros, 0)
@@ -232,7 +223,6 @@ export function AnomaliesPage({
         ← Retour au parc
       </button>
 
-      {/* En-tête résultat. */}
       <div className="flex flex-col items-center gap-5">
         <h2 className="text-center text-2xl font-semibold text-slate-800">
           Résultat de votre vérification
@@ -261,7 +251,6 @@ export function AnomaliesPage({
         </div>
       )}
 
-      {/* Filtres. */}
       <div className="flex flex-wrap gap-3">
         <input
           type="search"
@@ -301,7 +290,6 @@ export function AnomaliesPage({
         )}
       </div>
 
-      {/* Tableau groupé par entité. */}
       <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
         <table className="w-full min-w-[860px] table-fixed border-collapse text-sm">
           <colgroup>
@@ -362,7 +350,6 @@ export function AnomaliesPage({
         </table>
       </div>
 
-      {/* Pied. */}
       <div className="flex flex-wrap items-center justify-end gap-3">
         <button
           type="button"

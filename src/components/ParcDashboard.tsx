@@ -42,7 +42,6 @@ const ACCEPT: Record<
 
 type Tab = 'restitution' | 'matched' | 'erp_only' | 'fisc_only'
 
-/** Boutons de pied de page : revenir en arrière / configurer la réclamation. */
 function ReportActions({
   canGenerate,
   busy,
@@ -96,7 +95,6 @@ const RESOLUTION_LABEL: Record<ResolutionAction, string> = {
   keep: 'Conservé',
 }
 
-/** Boutons de résolution d'un cas non apparié. Disparaissent une fois résolu. */
 function ResolveActions({
   item,
   side,
@@ -173,7 +171,6 @@ export function ParcDashboard({
 
   return (
     <div className="flex flex-col gap-6">
-      {/* En-tête du parc (étape collecte / rapprochement Fisc-ERP). */}
       <div className="flex flex-col gap-1">
         <h2 className="text-xl font-semibold text-slate-800">Votre parc immobilier</h2>
         <p className="text-sm text-slate-500">
@@ -188,7 +185,6 @@ export function ParcDashboard({
         </div>
       )}
 
-      {/* Onglets : restitution + détail du rapprochement Fisc / ERP. */}
       <div className="flex flex-wrap gap-1 border-b border-slate-200">
         {tabs.map((t) => (
           <button
@@ -259,7 +255,6 @@ export function ParcDashboard({
   )
 }
 
-/** Tableau des biens appariés (avec ou sans écart financier). */
 function MatchedTable({ items }: { items: ReconcileItem[] }) {
   return (
     <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -303,7 +298,6 @@ function MatchedTable({ items }: { items: ReconcileItem[] }) {
   )
 }
 
-/** Tableau des cas non appariés : sélection multiple + actions (unitaire & lot). */
 function UnmatchedTable({
   items,
   side,
@@ -356,7 +350,6 @@ function UnmatchedTable({
     <div className="flex flex-col gap-3">
       <p className="text-sm text-slate-500">{help}</p>
 
-      {/* Barre d'actions en lot. */}
       {selected.size > 0 && (
         <div className="flex flex-wrap items-center gap-2 rounded-lg bg-slate-800 px-4 py-2.5 text-sm text-white">
           <span className="font-medium">{selected.size} sélectionné(s)</span>

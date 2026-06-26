@@ -1,15 +1,3 @@
-/**
- * Couche serveur — API d'import Kadastra.
- *
- * Pipeline en deux appels :
- *   POST /api/extract  → lit le fichier (xlsx/csv), renvoie en-têtes + aperçu
- *                        + mapping proposé. (Étapes 1 & 2)
- *   POST /api/process  → applique le mapping confirmé, valide, renvoie les
- *                        biens + un rapport exploitable. (Étape 3)
- *
- * Principe directeur : aucune entrée malformée ne doit faire planter le
- * serveur. Toute erreur est interceptée et renvoyée en JSON (`ApiError`).
- */
 import express from 'express'
 import type { Request, Response, NextFunction } from 'express'
 import type { IncomingMessage } from 'node:http'
@@ -36,7 +24,7 @@ import type {
 } from '../src/api/contracts'
 
 const PORT = Number(process.env.PORT ?? 3001)
-const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10 Mo
+const MAX_FILE_SIZE = 10 * 1024 * 1024
 const PREVIEW_ROWS = 5
 
 const upload = multer({
@@ -52,7 +40,6 @@ const app = express()
 app.use(cors())
 app.use(express.json({ limit: '1mb' }))
 
-/** Wrapper async : toute erreur part vers le middleware d'erreurs central. */
 function handler(
   fn: (req: Request, res: Response) => void | Promise<void>,
 ) {
@@ -65,19 +52,11 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' })
 })
 
-/** Capture les corps NON multipart (flux binaire, text/csv…) en Buffer. */
 function rawUploadType(req: IncomingMessage): boolean {
   const ct = String(req.headers['content-type'] ?? '')
   return !ct.includes('multipart/form-data') && !ct.includes('application/json')
 }
 
-/**
- * Étape 1 & 2 : extraction des en-têtes/aperçu + suggestion de mapping.
- * Accepte DEUX conventions d'upload :
- *   - `multipart/form-data` champ `file` (navigateur / FormData) ;
- *   - corps binaire brut (`application/octet-stream`, `text/csv`…) — le format
- *     est alors déduit du contenu (magic bytes).
- */
 app.post(
   ['/api/upload', '/api/extract', '/upload'],
   express.raw({ type: rawUploadType, limit: MAX_FILE_SIZE }),
@@ -107,7 +86,7 @@ app.post(
 
     const { headers, rows } = extractTableFromBuffer(buffer, format)
     if (headers.length === 0) {
-      sendError(res, 422, 'Fichier vide ou sans ligne d’en-tête exploitable.')
+      sendError(res, 422, `Fichier vide ou sans ligne d'en-tête exploitable.`)
       return
     }
 
@@ -126,7 +105,6 @@ app.post(
   }),
 )
 
-/** Étape 3 : validation et restitution à partir du mapping confirmé. */
 app.post(
   '/api/process',
   handler((req, res) => {
@@ -146,7 +124,7 @@ app.post(
 
     const stored = getUpload(uploadId)
     if (!stored) {
-      sendError(res, 404, 'Upload introuvable ou expiré. Relancez l’import.')
+      sendError(res, 404, `Upload introuvable ou expiré. Relancez l'import.`)
       return
     }
 
@@ -156,7 +134,6 @@ app.post(
       mapping as ConfirmedMapping,
     )
 
-    // Anomalies bloquantes → 422, AUCUN traitement partiel.
     if (!outcome.ok) {
       const body: ValidationErrorBody = {
         error: `Validation échouée : ${outcome.anomalies.length} anomalie(s) bloquante(s).`,
@@ -167,7 +144,6 @@ app.post(
       return
     }
 
-    // Mémorise les biens validés pour le rapprochement (Page 1) ultérieur.
     stored.apartments = outcome.apartments
     stored.fiscal = undefined
     stored.reconcileState = undefined
@@ -178,9 +154,8 @@ app.post(
   }),
 )
 
-const REQUIRED_FIRST = 'Traitez d’abord le fichier (POST /api/process).'
+const REQUIRED_FIRST = `Traitez d'abord le fichier (POST /api/process).`
 
-/** Garantit fisc + état de rapprochement initialisés. Renvoie null si pas prêt. */
 function ensureReconcileReady(uploadId: unknown, res: Response) {
   if (typeof uploadId !== 'string' || uploadId === '') {
     sendError(res, 400, 'Paramètre « uploadId » manquant ou invalide.')
@@ -188,7 +163,7 @@ function ensureReconcileReady(uploadId: unknown, res: Response) {
   }
   const stored = getUpload(uploadId)
   if (!stored) {
-    sendError(res, 404, 'Upload introuvable ou expiré. Relancez l’import.')
+    sendError(res, 404, `Upload introuvable ou expiré. Relancez l'import.`)
     return null
   }
   if (!stored.apartments) {
@@ -202,7 +177,6 @@ function ensureReconcileReady(uploadId: unknown, res: Response) {
   return stored
 }
 
-/** Page 1 (rapprochement) : apparie le parc validé aux fiches fiscales. */
 app.post(
   '/api/reconcile',
   handler((req, res) => {
@@ -220,7 +194,6 @@ app.post(
 const RESOLUTIONS: readonly ResolutionAction[] = ['exclude', 'attach', 'import', 'keep']
 const BULK_RESOLUTIONS: readonly ResolutionAction[] = ['exclude', 'import', 'keep']
 
-/** Transition : résout un cas « ERP uniquement » ou « Fisc uniquement ». */
 app.post(
   '/api/reconcile/resolve',
   handler((req, res) => {
@@ -243,10 +216,9 @@ app.post(
     }
 
     const state = stored.reconcileState!
-    const key = invariant.trim().toUpperCase()
+    const k = invariant.trim().toUpperCase()
     const map = side === 'erp_only' ? state.resolvedErp : state.resolvedFisc
-    map.set(key, action as ResolutionAction)
-    // Rattachement croisé : marque aussi la cible de l'autre côté comme résolue.
+    map.set(k, action as ResolutionAction)
     if (action === 'attach' && typeof targetInvariant === 'string' && targetInvariant) {
       const other = side === 'erp_only' ? state.resolvedFisc : state.resolvedErp
       other.set(targetInvariant.trim().toUpperCase(), 'attach')
@@ -257,7 +229,6 @@ app.post(
   }),
 )
 
-/** Transition : résolution EN LOT de plusieurs cas non appariés. */
 app.post(
   '/api/reconcile/resolve-bulk',
   handler((req, res) => {
@@ -293,11 +264,6 @@ app.post(
   }),
 )
 
-/**
- * Édition d'un bien et application de la MÊME modification à plusieurs biens.
- * `indices` = positions à modifier ; `changes` = champs → nouvelles valeurs.
- * Persiste côté serveur puis renvoie les biens + le rapprochement recalculé.
- */
 app.post(
   '/api/biens/edit',
   handler((req, res) => {
@@ -318,7 +284,6 @@ app.post(
     }
 
     const apartments = stored.apartments!
-    // Ne garde que les clés de champ connues ; coerce selon le type.
     const entries = Object.entries(changes).filter(([k]) => k in FIELD_BY_KEY)
     let edited = 0
     for (const idx of indices) {
@@ -334,7 +299,6 @@ app.post(
       return
     }
 
-    // L'édition invalide le rapport déjà généré (les écarts ont changé).
     stored.anomalies = undefined
 
     const body: BienEditResponse = {
@@ -345,7 +309,6 @@ app.post(
   }),
 )
 
-/** Verrou + génération du rapport d'anomalies (Page 2), « l'euro d'abord ». */
 app.post(
   '/api/report/generate',
   handler((req, res) => {
@@ -366,7 +329,6 @@ app.post(
       return
     }
 
-    // Conserve les statuts déjà saisis si on régénère.
     const previous = new Map<string, AnomalyStatus>(
       (stored.anomalies ?? []).map((a) => [a.id, a.status]),
     )
@@ -376,7 +338,6 @@ app.post(
   }),
 )
 
-/** Qualification d'anomalies (single si 1 id, BULK si plusieurs). */
 app.post(
   '/api/anomalies/status',
   handler((req, res) => {
@@ -438,23 +399,20 @@ function buildAnomalyReport(anomalies: FiscalAnomaly[]) {
   }
 }
 
-/** 404 JSON pour toute route /api inconnue. */
 app.use('/api', (_req, res) => {
   sendError(res, 404, 'Route inconnue.')
 })
 
-/** Middleware d'erreurs central : transforme toute exception en JSON propre. */
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   if (err instanceof multer.MulterError) {
     const message =
       err.code === 'LIMIT_FILE_SIZE'
         ? 'Fichier trop volumineux (10 Mo maximum).'
-        : `Erreur d’upload : ${err.message}`
+        : `Erreur d'upload : ${err.message}`
     sendError(res, 400, message)
     return
   }
   const message = err instanceof Error ? err.message : 'Erreur interne inattendue.'
-  // 422 : la requête est bien formée mais le contenu n'a pas pu être traité.
   sendError(res, 422, message)
 })
 

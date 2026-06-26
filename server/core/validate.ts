@@ -1,17 +1,3 @@
-/**
- * Étape 3 du pipeline — moteur de validation et de restitution.
- *
- * Deux niveaux de sévérité (spéc. Kadastra) :
- *   - ANOMALIES bloquantes → on REFUSE le traitement partiel et on renvoie la
- *     liste des erreurs (l'appelant répond 422). Cas : colonne obligatoire non
- *     mappée, ou type incohérent dans un champ OBLIGATOIRE (ex. texte dans la
- *     surface).
- *   - WARNINGS non bloquants → on accepte l'import et on signale. Cas : champ
- *     optionnel mal formé (vidé), champ obligatoire mappé mais vide (à
- *     compléter), ligne vide écartée, colonne ignorée.
- *
- * Tout est défensif : on ne lève jamais d'exception, on renvoie un résultat.
- */
 import {
   FIELDS,
   FIELD_BY_KEY,
@@ -32,21 +18,17 @@ import type {
   Warning,
 } from '../../src/api/contracts'
 
-/** Résultat du traitement : succès (biens + rapport) ou échec bloquant. */
 export type ProcessOutcome =
   | ({ ok: true } & ProcessResponse)
   | { ok: false; anomalies: Anomaly[] }
 
-/** Résultat de coercition d'une cellule. */
 interface Coerced {
   value: CellValue
-  /** `empty` = vide, `invalid` = présent mais incompatible avec le type. */
   status: 'ok' | 'empty' | 'invalid'
 }
 
 const EMPTY: Coerced = { value: '', status: 'empty' }
 
-/** Parse une date depuis un objet Date, un sériel Excel ou une chaîne FR/ISO. */
 function coerceDate(raw: unknown): Coerced {
   if (raw instanceof Date && !Number.isNaN(raw.getTime())) {
     return { value: raw.toISOString().slice(0, 10), status: 'ok' }
@@ -74,7 +56,6 @@ function coerceDate(raw: unknown): Coerced {
   return { value: '', status: 'invalid' }
 }
 
-/** Convertit une valeur brute selon le type du champ. */
 function coerce(field: FieldDef, raw: unknown): Coerced {
   if (raw === null || raw === undefined || raw === '') return EMPTY
 
@@ -105,12 +86,10 @@ function coerce(field: FieldDef, raw: unknown): Coerced {
   }
 }
 
-/** Coerce une valeur selon le type du champ (pour l'édition d'un bien). */
 export function coerceCell(field: FieldDef, raw: unknown): CellValue {
   return coerce(field, raw).value
 }
 
-/** Champs effectivement mappés à une colonne source valide. */
 function resolveMapping(
   mapping: ConfirmedMapping,
   width: number,
@@ -138,10 +117,6 @@ function typeLabel(type: FieldDef['type']): string {
   }
 }
 
-/**
- * Cœur du moteur : applique le mapping, valide selon les deux niveaux de
- * sévérité, et renvoie soit les biens + rapport, soit les anomalies bloquantes.
- */
 export function processRows(
   headers: string[],
   rows: RawRow[],
@@ -153,7 +128,6 @@ export function processRows(
   const anomalies: Anomaly[] = []
   const warnings: Warning[] = []
 
-  // (A) Anomalie bloquante : colonne obligatoire non mappée.
   for (const key of REQUIRED_FIELDS) {
     if (!resolved.has(key)) {
       anomalies.push({
@@ -164,20 +138,18 @@ export function processRows(
     }
   }
 
-  // Colonnes source non utilisées → warning informatif.
   const usedColumns = new Set(resolved.values())
   const unmappedColumns = headers.filter((_, i) => !usedColumns.has(i))
   for (const h of unmappedColumns) {
     warnings.push({ kind: 'unmapped_column', message: `Colonne « ${h} » du fichier non mappée (ignorée).` })
   }
 
-  // (B) Parcours des lignes.
   const apartments: Apartment[] = []
   const rowReports: RowReport[] = []
   let skippedRows = 0
 
   rows.forEach((row, idx) => {
-    const sourceRow = idx + 2 // +1 en-tête, +1 pour passer en 1-based
+    const sourceRow = idx + 2
     const apt = emptyApartment()
     let hasAnyValue = false
     const rowAnomalies: Anomaly[] = []
@@ -190,7 +162,6 @@ export function processRows(
       if (status !== 'empty') hasAnyValue = true
       if (status === 'invalid') {
         if (field.required) {
-          // Type incohérent dans un champ obligatoire → BLOQUANT.
           rowAnomalies.push({
             kind: 'type_mismatch',
             field: key,
@@ -199,7 +170,6 @@ export function processRows(
             message: `Ligne ${sourceRow} : « ${field.label} » attend un ${typeLabel(field.type)}, mais a reçu « ${String(row[col])} ».`,
           })
         } else {
-          // Type incohérent dans un champ optionnel → WARNING (valeur vidée).
           rowWarnings.push({
             kind: 'malformed_optional',
             field: key,
@@ -210,7 +180,6 @@ export function processRows(
       }
     }
 
-    // Ligne entièrement vide (colonnes mappées) → écartée (warning).
     if (!hasAnyValue) {
       skippedRows++
       warnings.push({ kind: 'skipped_row', sourceRow, message: `Ligne ${sourceRow} vide, écartée.` })
@@ -220,7 +189,6 @@ export function processRows(
     anomalies.push(...rowAnomalies)
     warnings.push(...rowWarnings)
 
-    // Restitution : champs encore vides (à compléter).
     const missingRequired = REQUIRED_FIELDS.filter((k) => apt[k] === '')
     const missingOptional = FIELDS.filter((f) => !f.required && apt[f.key] === '').map(
       (f) => f.key,
@@ -247,7 +215,6 @@ export function processRows(
     apartments.push(apt)
   })
 
-  // (C) Au moins une anomalie bloquante → on refuse le traitement partiel.
   if (anomalies.length > 0) {
     return { ok: false, anomalies }
   }

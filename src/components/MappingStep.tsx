@@ -13,17 +13,14 @@ interface MappingStepProps {
   onBack: () => void
   processing?: boolean
   error?: string | null
-  /** Détail des anomalies bloquantes renvoyées par le serveur (422). */
   errorDetails?: string[] | null
 }
 
-/** Affiche une cellule d'aperçu brute. */
 function previewCell(value: RawCell): string {
   if (value === null || value === undefined || value === '') return '—'
   return String(value)
 }
 
-/** Badge décrivant l'origine d'une suggestion. */
 function SuggestionBadge({ suggestion }: { suggestion?: MappingSuggestion }) {
   if (!suggestion || suggestion.columnIndex === null) return null
   const pct = Math.round(suggestion.confidence * 100)
@@ -100,7 +97,6 @@ export function MappingStep({
         </p>
       </div>
 
-      {/* Aperçu des données brutes (Étape 1). */}
       <section className="flex flex-col gap-2">
         <h3 className="text-sm font-semibold text-slate-700">
           Aperçu du fichier ({extract.preview.length} premières lignes)
@@ -131,7 +127,6 @@ export function MappingStep({
         </div>
       </section>
 
-      {/* Récapitulatif + alertes. */}
       <div className="flex flex-wrap items-center gap-3 text-sm">
         <span className="rounded-lg bg-slate-100 px-3 py-1.5 font-medium text-slate-700">
           {mappedCount} / {FIELDS.length} champs mappés
@@ -148,7 +143,6 @@ export function MappingStep({
         )}
       </div>
 
-      {/* Éditeur de mapping, groupé par section. */}
       <div className="flex flex-col gap-5">
         {FIELD_GROUPS.map((group) => (
           <fieldset

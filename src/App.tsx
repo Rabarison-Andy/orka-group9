@@ -144,16 +144,16 @@ function App() {
     setView('form')
   }
 
-  async function handleSave(updated: Apartment) {
+  async function handleSave(updated: Apartment, indices: number[]) {
     if (selectedIndex === null || !extract) return
     setBusy(true)
     try {
-      const res = await editBiens(extract.uploadId, [selectedIndex], updated)
+      const res = await editBiens(extract.uploadId, indices, updated)
       setApartments(res.apartments)
       setReconcileData(res.reconcile)
     } catch {
       // repli local si l'API échoue : on garde la saisie
-      setApartments((prev) => prev.map((apt, i) => (i === selectedIndex ? updated : apt)))
+      setApartments((prev) => prev.map((apt, i) => (indices.includes(i) ? updated : apt)))
     } finally {
       setBusy(false)
       setView(returnView)
@@ -223,6 +223,7 @@ function App() {
         <ConfigureForm
           apartment={selected}
           index={selectedIndex}
+          apartments={apartments}
           onSave={handleSave}
           onBack={() => {
             setView(returnView)

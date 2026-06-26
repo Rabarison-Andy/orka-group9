@@ -1,16 +1,15 @@
 import { useState } from 'react'
 import type { Apartment } from '../types'
 
+type ApplyMode = 'all' | 'selection' | null
+
 interface ConfigureFormProps {
   apartment: Apartment
   index: number
-  onSave: (apartment: Apartment) => void
+  apartments: Apartment[]
+  onSave: (apartment: Apartment, indices: number[]) => void
   onBack: () => void
 }
-
-// ============================================================================
-// 🧩 COMPOSANTS UI RÉUTILISABLES
-// ============================================================================
 
 function StepHeader({ title, description }: { title: string; description?: string }) {
   return (
@@ -144,15 +143,12 @@ function ToggleRow({
   )
 }
 
-// ============================================================================
-// 🚀 COMPOSANT PRINCIPAL (Wizard)
-// ============================================================================
-
-export function ConfigureForm({ apartment, onSave, onBack }: ConfigureFormProps) {
+export function ConfigureForm({ apartment, index, apartments, onSave, onBack }: ConfigureFormProps) {
   const [draft, setDraft] = useState<Apartment>({ ...apartment })
-  const [step, setStep] = useState(1) // On remet à 1 pour le flux normal
+  const [step, setStep] = useState(1)
+  const [applyMode, setApplyMode] = useState<ApplyMode>(null)
+  const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set([index]))
 
-  // ⚠️ État temporaire pour les éléments de l'étape 2 (qui ne sont pas dans types.ts)
   const [annexes, setAnnexes] = useState({ parking: 0, box: 0, cave: 0, piece: 0, terrasse: 0, toiture: 0 })
 
   function update(key: keyof Apartment, value: string | number) {
@@ -161,8 +157,21 @@ export function ConfigureForm({ apartment, onSave, onBack }: ConfigureFormProps)
   function updateAnnexe(key: keyof typeof annexes, value: number) {
     setAnnexes((prev) => ({ ...prev, [key]: value }))
   }
+  function toggleIndex(i: number) {
+    if (i === index) return
+    setSelectedIndices((prev) => {
+      const next = new Set(prev)
+      if (next.has(i)) next.delete(i)
+      else next.add(i)
+      return next
+    })
+  }
+  function computeIndices(): number[] {
+    if (applyMode === 'all') return apartments.map((_, i) => i)
+    if (applyMode === 'selection') return [...selectedIndices]
+    return [index]
+  }
 
-  // Utilitaire pour extraire un nombre propre pour les compteurs
   const getNum = (val: string | number | undefined | null) => (typeof val === 'number' ? val : 0)
 
   return (
@@ -185,7 +194,6 @@ export function ConfigureForm({ apartment, onSave, onBack }: ConfigureFormProps)
             <span className="text-sm font-semibold text-slate-800">{step}/5</span>
           </div>
 
-          {/* ÉTAPE 1 : IDENTIFICATION */}
           {step === 1 && (
             <div className="animate-in fade-in duration-300">
               <StepHeader title="Informations générales" />
@@ -203,12 +211,9 @@ export function ConfigureForm({ apartment, onSave, onBack }: ConfigureFormProps)
             </div>
           )}
 
-          {/* ÉTAPE 2 : SURFACE ET ANNEXES */}
           {step === 2 && (
             <div className="animate-in fade-in duration-300">
               <StepHeader title="Surface habitable" />
-              
-              {/* ⚠️ ZONE À MODIFIER : Faux texte d'alerte */}
               <div className="mb-8 flex items-start gap-3 rounded-lg bg-[#eef2f3] p-4 text-sm text-slate-600">
                 <svg className="mt-0.5 size-4 shrink-0 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                 <p>Texte explicatif sur la surface à remplacer par le vrai contenu de votre maquette.</p>
@@ -232,7 +237,6 @@ export function ConfigureForm({ apartment, onSave, onBack }: ConfigureFormProps)
             </div>
           )}
 
-          {/* ÉTAPE 3 : COEFFICIENTS */}
           {step === 3 && (
             <div className="animate-in fade-in duration-300">
               <StepHeader title="Coefficients d'évaluation" description="Ajustez les coefficients qui impactent la valeur locative de votre bien." />
@@ -248,7 +252,6 @@ export function ConfigureForm({ apartment, onSave, onBack }: ConfigureFormProps)
             </div>
           )}
 
-          {/* ÉTAPE 4 : CONFORT */}
           {step === 4 && (
             <div className="animate-in fade-in duration-300">
               <StepHeader title="Confort" description="Renseignez si votre bien est raccordé aux équipements suivants." />
@@ -261,47 +264,106 @@ export function ConfigureForm({ apartment, onSave, onBack }: ConfigureFormProps)
             </div>
           )}
 
-          {/* =================================================================
-              ÉTAPE 5 : SANITAIRES
-              ================================================================= */}
           {step === 5 && (
             <div className="animate-in fade-in duration-300">
-              <StepHeader 
-                title="Sanitaires" 
-                description="Saisissez le nombre d'éléments composant votre bien." 
+              <StepHeader
+                title="Sanitaires"
+                description="Saisissez le nombre d'éléments composant votre bien."
               />
-              
+
               <div className="mt-8 flex flex-col gap-6">
-                <CounterRow 
-                  title="Baignoire(s)" 
-                  description="Élément encastré ou posé servant à se baigner." 
-                  value={getNum(draft.nbBaignoires)} 
-                  onChange={(val) => update('nbBaignoires', val)} 
+                <CounterRow
+                  title="Baignoire(s)"
+                  description="Élément encastré ou posé servant à se baigner."
+                  value={getNum(draft.nbBaignoires)}
+                  onChange={(val) => update('nbBaignoires', val)}
                 />
-                <CounterRow 
-                  title="Receveur(s) de douche" 
-                  description="Bac posé au sol ou encastré recueillant l'eau de la douche." 
-                  value={getNum(draft.nbDouches)} 
-                  onChange={(val) => update('nbDouches', val)} 
+                <CounterRow
+                  title="Receveur(s) de douche"
+                  description="Bac posé au sol ou encastré recueillant l'eau de la douche."
+                  value={getNum(draft.nbDouches)}
+                  onChange={(val) => update('nbDouches', val)}
                 />
-                <CounterRow 
-                  title="Lavabo(s)" 
-                  description="Vasque ou cuvette munie d'un écoulement d'eau, servant à faire sa toilette." 
-                  value={getNum(draft.nbEviers)} 
-                  onChange={(val) => update('nbEviers', val)} 
+                <CounterRow
+                  title="Lavabo(s)"
+                  description="Vasque ou cuvette munie d'un écoulement d'eau, servant à faire sa toilette."
+                  value={getNum(draft.nbEviers)}
+                  onChange={(val) => update('nbEviers', val)}
                 />
-                <CounterRow 
-                  title="W-C" 
-                  description="Cuvette raccordée à une chasse d'eau." 
-                  value={getNum(draft.nbWc)} 
-                  onChange={(val) => update('nbWc', val)} 
+                <CounterRow
+                  title="W-C"
+                  description="Cuvette raccordée à une chasse d'eau."
+                  value={getNum(draft.nbWc)}
+                  onChange={(val) => update('nbWc', val)}
                 />
               </div>
 
-              <NavigationFooter 
-                onPrev={() => setStep(4)} 
-                onNext={() => onSave(draft)} 
-                nextLabel="Visualiser mon estimation" 
+              {/* Appliquer à */}
+              <div className="mt-8 rounded-xl border border-slate-200 bg-slate-50 p-5">
+                <h3 className="mb-4 text-sm font-bold text-slate-800">Appliquer ces paramètres à</h3>
+                <div className="flex flex-col gap-3">
+                  <label className="flex cursor-pointer items-center gap-3">
+                    <input
+                      type="radio"
+                      name="applyMode"
+                      checked={applyMode === 'all'}
+                      onChange={() => setApplyMode('all')}
+                      className="accent-[#14361f]"
+                    />
+                    <span className="text-sm text-slate-700">Tous les biens ({apartments.length})</span>
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-3">
+                    <input
+                      type="radio"
+                      name="applyMode"
+                      checked={applyMode === 'selection'}
+                      onChange={() => setApplyMode('selection')}
+                      className="accent-[#14361f]"
+                    />
+                    <span className="text-sm text-slate-700">Une sélection de biens</span>
+                  </label>
+                </div>
+
+                {applyMode === 'selection' && (
+                  <div className="mt-4 max-h-52 overflow-y-auto rounded-lg border border-slate-200 bg-white">
+                    {apartments.map((apt, i) => (
+                      <label
+                        key={i}
+                        className={`flex cursor-pointer items-center gap-3 border-b border-slate-100 px-4 py-2.5 last:border-0 ${
+                          i === index ? 'bg-emerald-50/60' : 'hover:bg-slate-50'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          className="accent-[#14361f]"
+                          checked={selectedIndices.has(i)}
+                          onChange={() => toggleIndex(i)}
+                          disabled={i === index}
+                        />
+                        <div className="flex flex-1 items-center gap-4 text-sm">
+                          <span className="font-medium text-slate-700">
+                            {String(apt.natureBien ?? '—')}
+                          </span>
+                          <span className="text-slate-400">
+                            {apt.surface != null ? `${apt.surface} m²` : '—'}
+                          </span>
+                          <span className="text-slate-400">
+                            {apt.etage != null && apt.etage !== '' ? `Ét. ${apt.etage}` : 'RDC'}
+                          </span>
+                        </div>
+                        {i === index && (
+                          <span className="shrink-0 text-xs font-medium text-emerald-600">En cours</span>
+                        )}
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <NavigationFooter
+                onPrev={() => setStep(4)}
+                onNext={() => onSave(draft, computeIndices())}
+                nextLabel="Visualiser mon estimation"
               />
             </div>
           )}

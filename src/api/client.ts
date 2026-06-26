@@ -1,8 +1,3 @@
-/**
- * Client HTTP du front vers l'API d'import.
- * Centralise les appels `fetch`, le parsing JSON et la remontée d'erreurs
- * sous une forme unique (`ApiClientError`) exploitable par les composants.
- */
 import type { Apartment } from '../types'
 import type {
   AnomalyReport,
@@ -26,7 +21,6 @@ export class ApiClientError extends Error {
   }
 }
 
-/** Lit la réponse : JSON si possible, sinon message d'erreur générique. */
 async function readJson<T>(res: Response): Promise<T> {
   const text = await res.text()
   let body: unknown = null
@@ -46,7 +40,6 @@ async function readJson<T>(res: Response): Promise<T> {
   return body as T
 }
 
-/** Étape 1 & 2 : envoie le fichier, récupère en-têtes + aperçu + suggestions. */
 export async function extractFile(file: File): Promise<ExtractResponse> {
   const form = new FormData()
   form.append('file', file)
@@ -55,13 +48,12 @@ export async function extractFile(file: File): Promise<ExtractResponse> {
     res = await fetch('/api/upload', { method: 'POST', body: form })
   } catch {
     throw new ApiClientError(
-      'Serveur injoignable. Vérifiez que l’API est démarrée (npm run dev).',
+      `Serveur injoignable. Vérifiez que l'API est démarrée (npm run dev).`,
     )
   }
   return readJson<ExtractResponse>(res)
 }
 
-/** Étape 3 : envoie le mapping confirmé, récupère biens + rapport de validation. */
 export async function processMapping(
   uploadId: string,
   mapping: ConfirmedMapping,
@@ -69,7 +61,6 @@ export async function processMapping(
   return postJson<ProcessResponse>('/api/process', { uploadId, mapping })
 }
 
-/** Helper POST JSON commun aux endpoints de rapprochement / anomalies. */
 async function postJson<T>(path: string, body: unknown): Promise<T> {
   let res: Response
   try {
@@ -84,12 +75,10 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
   return readJson<T>(res)
 }
 
-/** Page 1 — rapproche le parc validé aux fiches fiscales. */
 export function reconcile(uploadId: string): Promise<ReconcileResponse> {
   return postJson<ReconcileResponse>('/api/reconcile', { uploadId })
 }
 
-/** Transition — résout un cas « ERP uniquement » ou « Fisc uniquement ». */
 export function resolveCase(
   uploadId: string,
   invariant: string,
@@ -106,7 +95,6 @@ export function resolveCase(
   })
 }
 
-/** Transition — résout en LOT plusieurs cas non appariés. */
 export function resolveBulk(
   uploadId: string,
   side: 'erp_only' | 'fisc_only',
@@ -121,7 +109,6 @@ export function resolveBulk(
   })
 }
 
-/** Édite un ou plusieurs biens (même modification appliquée à `indices`). */
 export function editBiens(
   uploadId: string,
   indices: number[],
@@ -130,12 +117,10 @@ export function editBiens(
   return postJson<BienEditResponse>('/api/biens/edit', { uploadId, indices, changes })
 }
 
-/** Verrou + génération du rapport d'anomalies (Page 2). */
 export function generateReport(uploadId: string): Promise<AnomalyReport> {
   return postJson<AnomalyReport>('/api/report/generate', { uploadId })
 }
 
-/** Qualification d'anomalies (single si 1 id, bulk si plusieurs). */
 export function updateAnomalyStatus(
   uploadId: string,
   anomalyIds: string[],
